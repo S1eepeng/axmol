@@ -70,7 +70,7 @@ public:
      */
     Buffer* createBuffer(size_t size, BufferType type, BufferUsage usage, const void* initial) override;
 
-    Buffer* createBuffer(const BufferDesc& desc, const void* initial = nullptr) override;
+    Buffer* createBuffer(const BufferDesc& desc, const void* initial) override;
 
     /**
      * Create a Texture object.

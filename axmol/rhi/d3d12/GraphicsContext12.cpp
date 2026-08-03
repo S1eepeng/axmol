@@ -821,12 +821,32 @@ void GraphicsContextImpl::prepareDrawing(ID3D12GraphicsCommandList* cmd)
 
     const auto srvStride     = _driver->getSrvDescriptorStride();
     auto& textureBindingSets = _programState->getTextureBindingSets();
-    if (!textureBindingSets.empty())
+    auto& storageBindingSets = _programState->getStorageBufferBindingSets();
+    if (!textureBindingSets.empty() || !storageBindingSets.empty())
     {
         const auto bindingStart = _srvOffset[_frameIndex];
 
-        // Copy descriptors for each texture in the binding set
         int maxSlot = -1;
+
+        // Copy storage buffer SRVs (bound first in the SRV table).
+        for (auto& [binding, bindingSet] : storageBindingSets)
+        {
+            if (!bindingSet.buffer)
+                continue;
+            auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+            auto srvHandle  = bufferImpl->getSRV();
+            if (!srvHandle)
+                continue;
+
+            if (maxSlot < static_cast<int>(binding))
+                maxSlot = static_cast<int>(binding);
+
+            auto dstSrv = srvCpuStart;
+            dstSrv.ptr += (bindingStart + binding) * srvStride;
+            _device->CopyDescriptorsSimple(1, dstSrv, srvHandle->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        }
+
+        // Copy descriptors for each texture in the binding set
         for (auto& [bindingIndex, bindingSet] : textureBindingSets)
         {
             const auto count = static_cast<int>(bindingSet.texs.size());

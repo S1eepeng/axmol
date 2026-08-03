@@ -630,6 +630,13 @@ void GraphicsContextImpl::endRenderPass()
         _d3d11Context->PSSetShaderResources(0, _textureBounds, _nullSRVs.data());
         _textureBounds = 0;
     }
+    if (_storageSrvMaxSlot)
+    {
+        _nullSRVs.resize(_storageSrvMaxSlot, nullptr);
+        _d3d11Context->PSSetShaderResources(0, _storageSrvMaxSlot, _nullSRVs.data());
+        _d3d11Context->VSSetShaderResources(0, _storageSrvMaxSlot, _nullSRVs.data());
+        _storageSrvMaxSlot = 0;
+    }
 }
 
 bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
@@ -816,6 +823,21 @@ void GraphicsContextImpl::prepareDrawing()
 
         for (uint16_t i = 0; i < samplerInfo.count; ++i)
             context->PSSetSamplers(static_cast<UINT>(samplerInfo.binding + i), 1, &sampler);
+    }
+
+    // Phase 3: bind read-only storage buffers (GPU render VS/PS) as SRVs on all stages.
+    for (const auto& [binding, bindingSet] : _programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        auto srv        = bufferImpl->getSRV();
+        if (!srv)
+            continue;
+        context->VSSetShaderResources(static_cast<UINT>(binding), 1, &srv);
+        context->PSSetShaderResources(static_cast<UINT>(binding), 1, &srv);
+        if (static_cast<UINT>(binding + 1) > _storageSrvMaxSlot)
+            _storageSrvMaxSlot = static_cast<UINT>(binding + 1);
     }
 
     // depth stencil

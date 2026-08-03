@@ -166,6 +166,7 @@ protected:
 
     tlx::pod_vector<ID3D11ShaderResourceView*> _nullSRVs;
     UINT _textureBounds{0};
+    UINT _storageSrvMaxSlot{0};
 
     UINT _swapChainFlags{0};
     UINT _syncInterval{0};

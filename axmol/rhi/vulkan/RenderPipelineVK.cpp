@@ -498,6 +498,18 @@ void RenderPipelineImpl::updatePipelineLayoutState(ProgramImpl* program)
         ++state.uniformDescriptorCount;
     }
 
+    // Storage buffers (read by the GPU render VS/PS) share set 1 with textures.
+    for (auto& sb : program->getActiveStorageBufferInfos())
+    {
+        VkDescriptorSetLayoutBinding& b = resourceBindings.emplace_back();
+        b.binding                       = sb.binding;
+        b.descriptorType                = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b.descriptorCount               = 1;
+        b.stageFlags                    = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        b.pImmutableSamplers            = nullptr;
+        ++state.storageDescriptorCount;
+    }
+
     const bool separateSamplers = !program->getActiveSamplerInfos().empty();
     tlx::pod_vector<VkDescriptorSetLayoutBinding> customSamplerBindings;
 

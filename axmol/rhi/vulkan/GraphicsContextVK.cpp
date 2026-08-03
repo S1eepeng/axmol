@@ -1132,6 +1132,28 @@ void GraphicsContextImpl::prepareDrawing()
         }
     }
 
+    // Storage buffers (read by the GPU render VS/PS) -> set 1, STORAGE_BUFFER.
+    for (const auto& [binding, bindingSet] : _programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        bufferImpl->setLastFenceValue(_frameFenceValue);
+
+        VkWriteDescriptorSet& write        = writes.emplace_back();
+        VkDescriptorBufferInfo& bufferInfo = _descriptorBufferInfos.emplace_back();
+        bufferInfo.buffer = bufferImpl->internalHandle();
+        bufferInfo.offset = 0;
+        bufferInfo.range  = VK_WHOLE_SIZE;
+
+        write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet          = descriptorSets[SET_INDEX_RESOURCE];
+        write.dstBinding      = static_cast<uint32_t>(binding);
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.descriptorCount = 1;
+        write.pBufferInfo     = &bufferInfo;
+    }
+
     const auto& activeSamplerInfos = _programState->getProgram()->getActiveSamplerInfos();
     const bool separateSamplers    = !activeSamplerInfos.empty();
 

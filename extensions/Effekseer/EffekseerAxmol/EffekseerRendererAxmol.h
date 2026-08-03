@@ -71,6 +71,8 @@ public:
     void ReleaseCachedCommands();
     void SetGlobalZOrder(float globalZOrder) { _globalZOrder = globalZOrder; }
 
+    ax::Renderer* getAxRenderer() const { return _axRenderer; }
+
     int GetRef() override { return Effekseer::ReferenceObject::GetRef(); }
     int AddRef() override { return Effekseer::ReferenceObject::AddRef(); }
     int Release() override { return Effekseer::ReferenceObject::Release(); }

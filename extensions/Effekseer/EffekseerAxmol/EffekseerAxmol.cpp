@@ -477,6 +477,11 @@ bool EffectManager::initialize(ax::Size visibleSize)
     _manager->SetRingRenderer(_renderer->CreateRingRenderer());
     _manager->SetTrackRenderer(_renderer->CreateTrackRenderer());
 
+    // Register the GPU particle system when the backend supports compute/storage/Texture3D.
+    Effekseer::GpuParticleSystem::Settings gpuSettings;
+    if (auto gpuSystem = _renderer->CreateGpuParticleSystem(gpuSettings))
+        _manager->SetGpuParticleSystem(gpuSystem);
+
     _renderer->SetProjectionMatrix(Effekseer::Matrix44().OrthographicRH(visibleSize.width, visibleSize.height, 1.0f, 400.0f));
     _renderer->SetCameraMatrix(Effekseer::Matrix44().LookAtRH(Effekseer::Vector3D(visibleSize.width / 2.0f, visibleSize.height / 2.0f, 200.0f),
                                                               Effekseer::Vector3D(visibleSize.width / 2.0f, visibleSize.height / 2.0f, -200.0f),
@@ -512,6 +517,11 @@ void EffectManager::begin(const ax::SceneRenderState& state, float globalZOrder)
     static_cast<EffekseerRendererAxmol::Renderer*>(_renderer.Get())->BeginFrame(state.getRenderer());
     setCameraMatrix(state.getViewMatrix());
     setProjectionMatrix(state.getProjectionMatrix());
+
+    // Run GPU particle compute once per frame, before any emitter draw command
+    // is enqueued, so compute commands are ordered ahead of render commands.
+    if (_manager)
+        _manager->Compute();
 }
 
 void EffectManager::end(const ax::SceneRenderState& state, float globalZOrder)

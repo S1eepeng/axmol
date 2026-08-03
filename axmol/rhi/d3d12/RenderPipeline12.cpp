@@ -232,12 +232,24 @@ void RenderPipelineImpl::updateRootSignature(ProgramImpl* program)
         rootIndex++;
     }
 
-    // --- FS SRVs (textures) -> descriptor table, space = SET_INDEX_SRV ---
+    // --- FS SRVs (textures) + storage buffers -> descriptor table, space = SET_INDEX_SRV ---
     tlx::pod_vector<D3D12_DESCRIPTOR_RANGE> srvRanges;
 
     // --- Sampler descriptor table (global heap) ---
     D3D12_DESCRIPTOR_RANGE samplerRange{};
     uint32_t customSamplerCount = 0;
+
+    // Storage buffers (read by the GPU render VS/PS) become SRVs in the table
+    // first, matching the unified logical resource slot sequence.
+    for (const auto& sb : program->getActiveStorageBufferInfos())
+    {
+        D3D12_DESCRIPTOR_RANGE& r           = srvRanges.emplace_back();
+        r.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        r.NumDescriptors                    = 1;
+        r.BaseShaderRegister                = sb.binding;
+        r.RegisterSpace                     = SET_INDEX_SRV;
+        r.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+    }
 
     auto& fsSamplers = program->getActiveTextureInfos();
     if (!fsSamplers.empty())
@@ -293,13 +305,16 @@ void RenderPipelineImpl::updateRootSignature(ProgramImpl* program)
             customSamplerParam.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
             entry.customSamplerRootIndex                           = rootIndex++;
         }
+    }
 
-        // Add SRV descriptor table root parameter
+    // Add SRV descriptor table root parameter (textures + storage buffers).
+    if (!srvRanges.empty())
+    {
         D3D12_ROOT_PARAMETER& srvParam               = rootParams.emplace_back();
         srvParam.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         srvParam.DescriptorTable.NumDescriptorRanges = static_cast<UINT>(srvRanges.size());
         srvParam.DescriptorTable.pDescriptorRanges   = srvRanges.data();
-        srvParam.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+        srvParam.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
         entry.srvRootIndex                           = rootIndex++;
     }
 

@@ -423,6 +423,17 @@ void GraphicsContextImpl::bindUniforms(ProgramImpl* program) const
                     __state->bindSampler(slot, glSampler);
             }
         }
+
+#if AX_GL_HAS_COMPUTE
+        // Bind storage buffers (SSBO) read by the GPU render vertex/fragment stages.
+        for (const auto& [binding, bindingSet] : _programState->getStorageBufferBindingSets())
+        {
+            if (!bindingSet.buffer)
+                continue;
+            auto ssbo = static_cast<BufferImpl*>(bindingSet.buffer)->internalHandle();
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, ssbo);
+        }
+#endif
     }
 }
 
