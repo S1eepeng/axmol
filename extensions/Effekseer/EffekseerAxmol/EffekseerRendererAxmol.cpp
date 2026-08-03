@@ -83,10 +83,10 @@ ax::rhi::SamplerDesc ToSamplerDesc(Effekseer::TextureFilterType filter, Effeksee
     return samplerDesc;
 }
 
-class AxVertexBuffer : public Effekseer::Backend::VertexBuffer
+class VertexBufferAX : public Effekseer::Backend::VertexBuffer
 {
 public:
-    AxVertexBuffer(ax::rhi::Buffer* buffer, int32_t size, const void* initialData) : _buffer(buffer), _shadow(size)
+    VertexBufferAX(ax::rhi::Buffer* buffer, int32_t size, const void* initialData) : _buffer(buffer), _shadow(size)
     {
         if (_buffer)
             _buffer->retain();
@@ -96,7 +96,7 @@ public:
             _buffer->updateData(_shadow.data(), _shadow.size());
     }
 
-    ~AxVertexBuffer() override { AX_SAFE_RELEASE(_buffer); }
+    ~VertexBufferAX() override { AX_SAFE_RELEASE(_buffer); }
 
     void UpdateData(const void* src, int32_t size, int32_t offset) override
     {
@@ -121,10 +121,10 @@ private:
     std::vector<uint8_t> _shadow;
 };
 
-class AxIndexBuffer : public Effekseer::Backend::IndexBuffer
+class IndexBufferAX : public Effekseer::Backend::IndexBuffer
 {
 public:
-    AxIndexBuffer(ax::rhi::Buffer* buffer,
+    IndexBufferAX(ax::rhi::Buffer* buffer,
                   int32_t elementCount,
                   Effekseer::Backend::IndexBufferStrideType stride,
                   const void* initialData)
@@ -142,7 +142,7 @@ public:
             _buffer->updateData(_shadow.data(), _shadow.size());
     }
 
-    ~AxIndexBuffer() override { AX_SAFE_RELEASE(_buffer); }
+    ~IndexBufferAX() override { AX_SAFE_RELEASE(_buffer); }
 
     void UpdateData(const void* src, int32_t size, int32_t offset) override
     {
@@ -166,10 +166,10 @@ private:
     std::vector<uint8_t> _shadow;
 };
 
-class AxTexture : public Effekseer::Backend::Texture
+class TextureAX : public Effekseer::Backend::Texture
 {
 public:
-    explicit AxTexture(ax::rhi::Texture* texture) : _texture(texture)
+    explicit TextureAX(ax::rhi::Texture* texture) : _texture(texture)
     {
         if (_texture)
             _texture->retain();
@@ -178,21 +178,21 @@ public:
         param_.Size = {_texture ? _texture->getWidth() : 1, _texture ? _texture->getHeight() : 1, 1};
     }
 
-    ~AxTexture() override { AX_SAFE_RELEASE(_texture); }
+    ~TextureAX() override { AX_SAFE_RELEASE(_texture); }
     ax::rhi::Texture* get() const { return _texture; }
 
 private:
     ax::rhi::Texture* _texture = nullptr;
 };
 
-class AxVertexLayout : public Effekseer::Backend::VertexLayout
+class VertexLayoutAX : public Effekseer::Backend::VertexLayout
 {
 };
 
-class AxUniformBuffer : public Effekseer::Backend::UniformBuffer
+class UniformBufferAX : public Effekseer::Backend::UniformBuffer
 {
 public:
-    explicit AxUniformBuffer(int32_t size, const void* initialData) : data(size)
+    explicit UniformBufferAX(int32_t size, const void* initialData) : data(size)
     {
         if (initialData && size > 0)
             memcpy(data.data(), initialData, size);
@@ -200,10 +200,10 @@ public:
     std::vector<uint8_t> data;
 };
 
-class AxStorageBuffer : public Effekseer::Backend::StorageBuffer
+class StorageBufferAX : public Effekseer::Backend::StorageBuffer
 {
 public:
-    AxStorageBuffer(ax::rhi::Buffer* buffer, int32_t elementCount, int32_t elementSize, const void* initialData)
+    StorageBufferAX(ax::rhi::Buffer* buffer, int32_t elementCount, int32_t elementSize, const void* initialData)
         : _buffer(buffer), _shadow(static_cast<size_t>(elementCount) * static_cast<size_t>(elementSize))
     {
         if (_buffer)
@@ -214,7 +214,7 @@ public:
             _buffer->updateData(_shadow.data(), _shadow.size());
     }
 
-    ~AxStorageBuffer() override { AX_SAFE_RELEASE(_buffer); }
+    ~StorageBufferAX() override { AX_SAFE_RELEASE(_buffer); }
 
     bool updateData(const void* src, int32_t size, int32_t offset)
     {
@@ -238,13 +238,13 @@ private:
     std::vector<uint8_t> _shadow;
 };
 
-class AxPipelineState : public Effekseer::Backend::PipelineState
+class PipelineStateAX : public Effekseer::Backend::PipelineState
 {
 public:
     Effekseer::Backend::PipelineStateParameter param;
 };
 
-class AxShader : public Effekseer::Backend::Shader
+class ShaderAX : public Effekseer::Backend::Shader
 {
 };
 
@@ -256,7 +256,7 @@ public:
         auto buffer = ax::rhi::GraphicsCore::device()->createBuffer(
             static_cast<size_t>(size), ax::rhi::BufferType::VERTEX,
             isDynamic ? ax::rhi::BufferUsage::DYNAMIC : ax::rhi::BufferUsage::STATIC, initialData);
-        auto ret = Effekseer::MakeRefPtr<AxVertexBuffer>(buffer, size, initialData);
+        auto ret = Effekseer::MakeRefPtr<VertexBufferAX>(buffer, size, initialData);
         AX_SAFE_RELEASE(buffer);
         return ret;
     }
@@ -266,7 +266,7 @@ public:
         const auto strideSize = stride == Effekseer::Backend::IndexBufferStrideType::Stride2 ? 2 : 4;
         auto buffer = ax::rhi::GraphicsCore::device()->createBuffer(
             static_cast<size_t>(elementCount * strideSize), ax::rhi::BufferType::INDEX, ax::rhi::BufferUsage::STATIC, initialData);
-        auto ret = Effekseer::MakeRefPtr<AxIndexBuffer>(buffer, elementCount, stride, initialData);
+        auto ret = Effekseer::MakeRefPtr<IndexBufferAX>(buffer, elementCount, stride, initialData);
         AX_SAFE_RELEASE(buffer);
         return ret;
     }
@@ -289,17 +289,17 @@ public:
 
     Effekseer::Backend::VertexLayoutRef CreateVertexLayout(const Effekseer::Backend::VertexLayoutElement*, int32_t) override
     {
-        return Effekseer::MakeRefPtr<AxVertexLayout>();
+        return Effekseer::MakeRefPtr<VertexLayoutAX>();
     }
 
     Effekseer::Backend::UniformBufferRef CreateUniformBuffer(int32_t size, const void* initialData) override
     {
-        return Effekseer::MakeRefPtr<AxUniformBuffer>(size, initialData);
+        return Effekseer::MakeRefPtr<UniformBufferAX>(size, initialData);
     }
 
     bool UpdateUniformBuffer(Effekseer::Backend::UniformBufferRef& buffer, int32_t size, int32_t offset, const void* data) override
     {
-        auto ub = buffer.DownCast<AxUniformBuffer>();
+        auto ub = buffer.DownCast<UniformBufferAX>();
         if (ub == nullptr || data == nullptr || offset < 0 || size < 0)
             return false;
         if (static_cast<size_t>(offset + size) > ub->data.size())
@@ -326,20 +326,20 @@ public:
                                                                                 : ax::rhi::BufferAccess::READ_WRITE;
 
         auto buffer = ax::rhi::GraphicsCore::device()->createBuffer(desc, initialData);
-        auto ret = Effekseer::MakeRefPtr<AxStorageBuffer>(buffer, elementCount, elementSize, initialData);
+        auto ret = Effekseer::MakeRefPtr<StorageBufferAX>(buffer, elementCount, elementSize, initialData);
         AX_SAFE_RELEASE(buffer);
         return ret;
     }
 
     bool UpdateStorageBuffer(Effekseer::Backend::StorageBufferRef& buffer, int32_t size, int32_t offset, const void* data) override
     {
-        auto storageBuffer = buffer.DownCast<AxStorageBuffer>();
+        auto storageBuffer = buffer.DownCast<StorageBufferAX>();
         return storageBuffer ? storageBuffer->updateData(data, size, offset) : false;
     }
 
     Effekseer::Backend::PipelineStateRef CreatePipelineState(const Effekseer::Backend::PipelineStateParameter& param) override
     {
-        auto state = Effekseer::MakeRefPtr<AxPipelineState>();
+        auto state = Effekseer::MakeRefPtr<PipelineStateAX>();
         state->param = param;
         return state;
     }
@@ -354,14 +354,14 @@ public:
         auto texture = ax::rhi::GraphicsCore::device()->createTexture(desc);
         if (texture && !initialData.empty())
             texture->updateData(initialData.data(), desc.width, desc.height, 0, 0);
-        auto ret = Effekseer::MakeRefPtr<AxTexture>(texture);
+        auto ret = Effekseer::MakeRefPtr<TextureAX>(texture);
         AX_SAFE_RELEASE(texture);
         return ret;
     }
 
     Effekseer::Backend::ShaderRef CreateShaderFromBinary(const void*, int32_t, const void*, int32_t) override
     {
-        return Effekseer::MakeRefPtr<AxShader>();
+        return Effekseer::MakeRefPtr<ShaderAX>();
     }
 
     void Draw(const Effekseer::Backend::DrawParameter&) override {}
@@ -398,7 +398,7 @@ public:
         auto context = axRenderer->getContext();
         if (context->copyTexture(rt, rhiTexture))
         {
-            _efkTexture = Effekseer::MakeRefPtr<AxTexture>(rhiTexture);
+            _efkTexture = Effekseer::MakeRefPtr<TextureAX>(rhiTexture);
             renderer->SetBackground(_efkTexture);
             return true;
         }
@@ -753,7 +753,7 @@ public:
             return nullptr;
         }
 
-        auto backendTexture = Effekseer::MakeRefPtr<AxTexture>(texture->getRHITexture());
+        auto backendTexture = Effekseer::MakeRefPtr<TextureAX>(texture->getRHITexture());
         texture->release();
         auto efkTexture = Effekseer::MakeRefPtr<Effekseer::Texture>();
         efkTexture->SetBackend(backendTexture);
@@ -776,7 +776,7 @@ public:
             texture->release();
             return nullptr;
         }
-        auto backendTexture = Effekseer::MakeRefPtr<AxTexture>(texture->getRHITexture());
+        auto backendTexture = Effekseer::MakeRefPtr<TextureAX>(texture->getRHITexture());
         texture->release();
         auto efkTexture = Effekseer::MakeRefPtr<Effekseer::Texture>();
         efkTexture->SetBackend(backendTexture);
@@ -999,7 +999,7 @@ void Renderer::SetTextures(EffekseerRenderer::ShaderBase* shaderBase, Effekseer:
     if (!shader)
         return;
 
-    auto proxyTexture = GetImpl()->GetProxyTexture(EffekseerRenderer::ProxyTextureType::White).DownCast<AxTexture>();
+    auto proxyTexture = GetImpl()->GetProxyTexture(EffekseerRenderer::ProxyTextureType::White).DownCast<TextureAX>();
     if (proxyTexture && proxyTexture->get())
         shader->setDefaultTextures(proxyTexture->get());
 
@@ -1010,7 +1010,7 @@ void Renderer::SetTextures(EffekseerRenderer::ShaderBase* shaderBase, Effekseer:
         if (i < 4)
             samplerModes[i] = ToSamplerMode(state.TextureFilterTypes[i], state.TextureWrapTypes[i]);
 
-        auto texture = textures[i].DownCast<AxTexture>();
+        auto texture = textures[i].DownCast<TextureAX>();
         if (texture && texture->get())
         {
             auto samplerDesc = ToSamplerDesc(state.TextureFilterTypes[i], state.TextureWrapTypes[i]);
@@ -1030,8 +1030,8 @@ void Renderer::DrawSprites(int32_t spriteCount, int32_t vertexOffset)
     auto shader = static_cast<Shader*>(_currentShader);
     shader->SetConstantBuffer();
 
-    auto vb = static_cast<AxVertexBuffer*>(_currentVertexBuffer.Get());
-    auto ib = static_cast<AxIndexBuffer*>(_currentIndexBuffer.Get());
+    auto vb = static_cast<VertexBufferAX*>(_currentVertexBuffer.Get());
+    auto ib = static_cast<IndexBufferAX*>(_currentIndexBuffer.Get());
     const auto vertexCount = static_cast<size_t>(spriteCount * 4);
     const auto vertexBytes = vertexCount * static_cast<size_t>(_currentVertexStride);
     const auto vertexOffsetBytes = static_cast<size_t>(vertexOffset) * static_cast<size_t>(_currentVertexStride);
