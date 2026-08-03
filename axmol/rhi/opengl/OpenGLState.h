@@ -12,6 +12,18 @@
 #    define GL_SHADER_STORAGE_BUFFER 0x90D2
 #endif
 
+#ifndef GL_COMPUTE_SHADER
+#    define GL_COMPUTE_SHADER 0x91B9
+#endif
+
+// Compute shader support at compile time: true when the GL headers expose
+// the 4.3+ / GLES 3.1+ compute and SSBO APIs (desktop GL loaders only for now).
+#if !defined(AX_GLES_PROFILE) || AX_GLES_PROFILE >= 310
+#    define AX_GL_HAS_COMPUTE 1
+#else
+#    define AX_GL_HAS_COMPUTE 0
+#endif
+
 // Inline opengl state set calls
 
 namespace ax::rhi::gl

@@ -113,6 +113,8 @@ public:
      */
     Program* createProgram(Data vsData, Data fsData) override;
 
+    Program* createComputeProgram(Data csData) override;
+
     VertexLayout* createVertexLayout(VertexLayoutDesc&&) override;
 
     void resetState() override;

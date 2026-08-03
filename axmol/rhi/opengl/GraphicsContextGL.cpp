@@ -645,4 +645,55 @@ bool GraphicsContextImpl::copyTexture(RenderTarget* src, Texture* dst)
     return framebufferComplete;
 }
 
+bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
+{
+#if AX_GL_HAS_COMPUTE
+    if (!desc.programState)
+        return false;
+
+    auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
+    if (!program || !program->getCSModule())
+        return false;
+
+    _programState = desc.programState;
+
+    __state->useProgram(program->internalHandle());
+
+    // Uniform buffers + textures + samplers (reuses the ProgramState bound above)
+    bindUniforms(program);
+
+    // Bind storage buffers (SSBO) at their reflected binding indices.
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer)
+            continue;
+        auto ssbo = static_cast<BufferImpl*>(bindingSet.buffer)->internalHandle();
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, ssbo);
+    }
+
+    CHECK_GL_ERROR_DEBUG();
+
+    glDispatchCompute(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
+
+    // Make compute writes visible to subsequent compute/vertex/fragment reads.
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+    // Unbind storage buffers to avoid stale SSBO bindings leaking into later draws.
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer)
+            continue;
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, 0);
+    }
+
+    CHECK_GL_ERROR_DEBUG();
+
+    cleanResources();
+    return true;
+#else
+    AX_UNUSED_PARAM(desc);
+    return false;
+#endif
+}
+
 }  // namespace ax::rhi::gl

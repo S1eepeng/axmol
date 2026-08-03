@@ -405,6 +405,11 @@ Program* GraphicsDeviceImpl::createProgram(Data vsData, Data fsData)
     return new ProgramImpl(vsData, fsData);
 }
 
+Program* GraphicsDeviceImpl::createComputeProgram(Data csData)
+{
+    return new ProgramImpl(csData);
+}
+
 VertexLayout* GraphicsDeviceImpl::createVertexLayout(VertexLayoutDesc&& desc)
 {
     return new VertexLayoutImpl(std::move(desc));

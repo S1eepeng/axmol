@@ -48,6 +48,16 @@ ProgramImpl::ProgramImpl(Data& vsData, Data& fsData) : Program(vsData, fsData)
 #endif
 }
 
+ProgramImpl::ProgramImpl(Data& csData) : Program(csData)
+{
+    compileProgram();
+#if AX_ENABLE_CONTEXT_LOSS_RECOVERY
+    _backToForegroundListener =
+        CustomEventListener::create(EVENT_RENDERER_RECREATED, [this](CustomEvent*) { this->reloadProgram(); });
+    Director::getInstance()->getEventDispatcher()->addEventListenerWithFixedPriority(_backToForegroundListener, -1);
+#endif
+}
+
 ProgramImpl::~ProgramImpl()
 {
     deleteUniformBuffers();
@@ -73,23 +83,37 @@ bool ProgramImpl::isValid() const
 
 void ProgramImpl::compileProgram()
 {
-    if (_vsModule == nullptr || _fsModule == nullptr)
-        return;
+    GLuint computeShader = 0;
+    GLuint vertShader    = 0;
+    GLuint fragShader    = 0;
+    if (_csModule)
+    {
+        computeShader = static_cast<ShaderModuleImpl*>(_csModule)->getShader();
+        if (computeShader == 0)
+            return;
+    }
+    else
+    {
+        if (_vsModule == nullptr || _fsModule == nullptr)
+            return;
 
-    /// --- link program
-    auto vertShader = static_cast<ShaderModuleImpl*>(_vsModule)->getShader();
-    auto fragShader = static_cast<ShaderModuleImpl*>(_fsModule)->getShader();
-
-    assert(vertShader != 0 && fragShader != 0);
-    if (vertShader == 0 || fragShader == 0)
-        return;
+        vertShader = static_cast<ShaderModuleImpl*>(_vsModule)->getShader();
+        fragShader = static_cast<ShaderModuleImpl*>(_fsModule)->getShader();
+        if (vertShader == 0 || fragShader == 0)
+            return;
+    }
 
     _program = glCreateProgram();
     if (!_program)
         return;
 
-    glAttachShader(_program, vertShader);
-    glAttachShader(_program, fragShader);
+    if (computeShader)
+        glAttachShader(_program, computeShader);
+    else
+    {
+        glAttachShader(_program, vertShader);
+        glAttachShader(_program, fragShader);
+    }
 
     glLinkProgram(_program);
 
@@ -100,14 +124,15 @@ void ProgramImpl::compileProgram()
         GLint errorInfoLen = 0;
         glGetProgramiv(_program, GL_INFO_LOG_LENGTH, &errorInfoLen);
 
-        std::string_view vsSource = _vsModule->getCode();
-        std::string_view fsSource = _fsModule->getCode();
+        std::string_view vsSource = _vsModule ? _vsModule->getCode() : std::string_view{};
+        std::string_view fsSource = _fsModule ? _fsModule->getCode() : std::string_view{};
+        std::string_view csSource = _csModule ? _csModule->getCode() : std::string_view{};
         if (errorInfoLen > 1)
         {
             auto errorInfo = tlx::make_unique_for_overwrite<char[]>(static_cast<size_t>(errorInfoLen));
             glGetProgramInfoLog(_program, errorInfoLen, NULL, errorInfo.get());
-            AXLOGE("axmol:ERROR: {}: failed to link program: {} \n--- vsSource ---\n{}\n --- fsSource ---\n{}",
-                   __FUNCTION__, errorInfo.get(), vsSource, fsSource);
+            AXLOGE("axmol:ERROR: {}: failed to link program: {} \n--- vsSource ---\n{}\n --- fsSource ---\n{}\n --- csSource ---\n{}",
+                   __FUNCTION__, errorInfo.get(), vsSource, fsSource, csSource);
         }
         else
             AXLOGE("axmol:ERROR: {}: failed to link program", __FUNCTION__);
