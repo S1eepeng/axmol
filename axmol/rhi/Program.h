@@ -201,6 +201,8 @@ public:
     SamplerLocation getSamplerLocation(std::string_view name) const;
     const std::vector<StorageBufferInfo>& getActiveStorageBufferInfos() const { return _activeStorageBufferInfos; }
 
+    const std::array<int, 3>& getComputeLocalSize() const { return _computeLocalSize; }
+
     /**
      * Get engine built-in program type.
      * @return The built-in program type.
@@ -272,6 +274,7 @@ protected:
     std::vector<SamplerBindingInfo> _activeSamplerInfos;
     std::vector<ProgramSamplerBinding> _samplerBindings;
     std::vector<StorageBufferInfo> _activeStorageBufferInfos;
+    std::array<int, 3> _computeLocalSize{};  // compute stage local workgroup size, else {0,0,0}
     // GL/GLES need this reflection mapping to bind sampler objects per combined texture uniform.
     std::unordered_map<int, SamplerId> _textureSamplerIds;
     std::unordered_map<int, SamplerLocation> _textureSamplerLocations;

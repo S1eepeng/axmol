@@ -266,6 +266,13 @@ void Program::parseStageReflection(ShaderStage stage, SLCReflectContext* context
             // context
             context->refl = &refl;
 
+            if (stage == ShaderStage::COMPUTE)
+            {
+                _computeLocalSize[0] = refl.compute_local_size[0];
+                _computeLocalSize[1] = refl.compute_local_size[1];
+                _computeLocalSize[2] = refl.compute_local_size[2];
+            }
+
             // refl_inputs
             reflectVertexInputs(context);
 
@@ -490,7 +497,11 @@ void Program::reflectStorageBuffers(SLCReflectContext* context)
         info.binding     = ibs->read<int32_t>();
         info.sizeBytes   = ibs->read<uint32_t>();
         info.arrayStride = ibs->read<uint32_t>();
-        info.stageFlags  = static_cast<uint16_t>(1u << static_cast<uint16_t>(context->stage));
+        info.space       = ibs->read<uint16_t>();
+        const auto access = ibs->read<uint8_t>();
+        ibs->read<uint8_t>();  // reserved
+        info.access     = access == SC_BUFFER_ACCESS_READ_WRITE ? BufferAccess::READ_WRITE : BufferAccess::READ_ONLY;
+        info.stageFlags = static_cast<uint16_t>(1u << static_cast<uint16_t>(context->stage));
         _activeStorageBufferInfos.emplace_back(info);
     }
 }
