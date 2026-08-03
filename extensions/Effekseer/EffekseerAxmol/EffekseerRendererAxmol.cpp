@@ -192,12 +192,77 @@ private:
 class VertexLayoutAX : public Effekseer::Backend::VertexLayout
 {
 public:
-    explicit VertexLayoutAX(ax::rhi::VertexLayout* layout) : _layout(layout) { AX_SAFE_RETAIN(_layout); }
-    ~VertexLayoutAX() override { AX_SAFE_RELEASE(_layout); }
+    void setElements(const Effekseer::Backend::VertexLayoutElement* elements, int32_t count)
+    {
+        _elements.assign(elements, elements + count);
+    }
+
+    /**
+     * Builds the backend vertex layout from the program's reflected vertex input
+     * descriptions. The location/semantic index must come from the program
+     * reflection (backends remap them differently), never from manual values.
+     */
+    void buildLayout(ax::rhi::Program* program)
+    {
+        AX_SAFE_RELEASE(_layout);
+        if (!program || _elements.empty())
+            return;
+
+        ax::rhi::VertexLayoutDesc desc;
+        desc.startLayout(_elements.size());
+        size_t offset = 0;
+        for (const auto& el : _elements)
+        {
+            auto inputDesc = program->getVertexInputDesc(
+                ax::rhi::VertexSemantic{el.SemanticName.c_str(), static_cast<uint16_t>(el.SemanticIndex)});
+            if (!inputDesc)
+                continue;
+
+            ax::rhi::VertexElementType elementType = ax::rhi::VertexElementType::FLOAT3;
+            bool needNormalize                      = false;
+            uint32_t elementSize                    = 12;
+            switch (el.Format)
+            {
+            case Effekseer::Backend::VertexLayoutFormat::R32_FLOAT:
+                elementType = ax::rhi::VertexElementType::FLOAT;
+                elementSize = 4;
+                break;
+            case Effekseer::Backend::VertexLayoutFormat::R32G32_FLOAT:
+                elementType = ax::rhi::VertexElementType::FLOAT2;
+                elementSize = 8;
+                break;
+            case Effekseer::Backend::VertexLayoutFormat::R32G32B32_FLOAT:
+                elementType = ax::rhi::VertexElementType::FLOAT3;
+                elementSize = 12;
+                break;
+            case Effekseer::Backend::VertexLayoutFormat::R32G32B32A32_FLOAT:
+                elementType = ax::rhi::VertexElementType::FLOAT4;
+                elementSize = 16;
+                break;
+            case Effekseer::Backend::VertexLayoutFormat::R8G8B8A8_UNORM:
+                elementType   = ax::rhi::VertexElementType::UBYTE4;
+                needNormalize = true;
+                elementSize   = 4;
+                break;
+            case Effekseer::Backend::VertexLayoutFormat::R8G8B8A8_UINT:
+                elementType = ax::rhi::VertexElementType::UBYTE4;
+                elementSize = 4;
+                break;
+            }
+            desc.addAttrib(inputDesc, elementType, offset, needNormalize);
+            offset += elementSize;
+        }
+        desc.endLayout(static_cast<int>(offset));
+
+        _layout = ax::rhi::GraphicsCore::device()->createVertexLayout(std::move(desc));
+    }
 
     ax::rhi::VertexLayout* get() const { return _layout; }
 
+    ~VertexLayoutAX() override { AX_SAFE_RELEASE(_layout); }
+
 private:
+    std::vector<Effekseer::Backend::VertexLayoutElement> _elements;
     ax::rhi::VertexLayout* _layout = nullptr;
 };
 
@@ -322,60 +387,9 @@ public:
 
     Effekseer::Backend::VertexLayoutRef CreateVertexLayout(const Effekseer::Backend::VertexLayoutElement* elements, int32_t count) override
     {
-        if (!elements || count <= 0)
-            return Effekseer::MakeRefPtr<VertexLayoutAX>(nullptr);
-
-        ax::rhi::VertexLayoutDesc desc;
-        desc.startLayout(static_cast<size_t>(count));
-        size_t offset = 0;
-        for (int32_t i = 0; i < count; ++i)
-        {
-            ax::rhi::VertexInputDesc inputDesc;
-            inputDesc.semantic = ax::rhi::VertexSemantic{elements[i].SemanticName.c_str(),
-                                                         static_cast<uint16_t>(elements[i].SemanticIndex)};
-            // axslcc assigns vertex input locations in declaration order.
-            inputDesc.location = i;
-            inputDesc.varType  = axslc::SC_TYPE_FLOAT4;
-
-            ax::rhi::VertexElementType elementType = ax::rhi::VertexElementType::FLOAT3;
-            bool needNormalize                      = false;
-            uint32_t elementSize                    = 12;
-            switch (elements[i].Format)
-            {
-            case Effekseer::Backend::VertexLayoutFormat::R32_FLOAT:
-                elementType = ax::rhi::VertexElementType::FLOAT;
-                elementSize = 4;
-                break;
-            case Effekseer::Backend::VertexLayoutFormat::R32G32_FLOAT:
-                elementType = ax::rhi::VertexElementType::FLOAT2;
-                elementSize = 8;
-                break;
-            case Effekseer::Backend::VertexLayoutFormat::R32G32B32_FLOAT:
-                elementType = ax::rhi::VertexElementType::FLOAT3;
-                elementSize = 12;
-                break;
-            case Effekseer::Backend::VertexLayoutFormat::R32G32B32A32_FLOAT:
-                elementType = ax::rhi::VertexElementType::FLOAT4;
-                elementSize = 16;
-                break;
-            case Effekseer::Backend::VertexLayoutFormat::R8G8B8A8_UNORM:
-                elementType   = ax::rhi::VertexElementType::UBYTE4;
-                needNormalize = true;
-                elementSize   = 4;
-                break;
-            case Effekseer::Backend::VertexLayoutFormat::R8G8B8A8_UINT:
-                elementType = ax::rhi::VertexElementType::UBYTE4;
-                elementSize = 4;
-                break;
-            }
-            desc.addAttrib(&inputDesc, elementType, offset, needNormalize);
-            offset += elementSize;
-        }
-        desc.endLayout(static_cast<int>(offset));
-
-        auto layout = ax::rhi::GraphicsCore::device()->createVertexLayout(std::move(desc));
-        auto ret    = Effekseer::MakeRefPtr<VertexLayoutAX>(layout);
-        AX_SAFE_RELEASE(layout);
+        auto ret = Effekseer::MakeRefPtr<VertexLayoutAX>();
+        if (elements && count > 0)
+            ret->setElements(elements, count);
         return ret;
     }
 
@@ -431,7 +445,14 @@ public:
 
         auto shader = param.ShaderPtr.DownCast<ShaderAX>();
         if (shader && shader->getProgram())
+        {
             state->programState = new ax::rhi::ProgramState(shader->getProgram());
+
+            // Build the graphics vertex layout from the program reflection.
+            auto layout = param.VertexLayoutPtr.DownCast<VertexLayoutAX>();
+            if (layout)
+                layout->buildLayout(shader->getProgram());
+        }
         return state;
     }
 

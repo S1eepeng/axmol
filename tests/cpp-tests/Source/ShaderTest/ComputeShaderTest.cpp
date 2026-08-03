@@ -114,16 +114,15 @@ bool ComputeDispatchTest::init()
 
     rhi::VertexLayoutDesc layoutDesc;
     layoutDesc.startLayout(2);
-    rhi::VertexInputDesc posDesc;
-    posDesc.semantic = rhi::VertexSemantic::POSITION;
-    posDesc.location = 0;
-    posDesc.varType  = axslc::SC_TYPE_FLOAT3;
-    rhi::VertexInputDesc idDesc;
-    idDesc.semantic = rhi::VertexSemantic::TEXCOORD0;
-    idDesc.location = 1;
-    idDesc.varType  = axslc::SC_TYPE_FLOAT;
-    layoutDesc.addAttrib(&posDesc, rhi::VertexElementType::FLOAT3, 0, false);
-    layoutDesc.addAttrib(&idDesc, rhi::VertexElementType::FLOAT, 12, false);
+    // Use the program's backend-reflected vertex input descriptions (semantic,
+    // location, varType); manually filling location breaks on backends that
+    // remap semantics (e.g. D3D12 TEXCOORD0 -> TEXCOORD1).
+    auto posDesc = _renderProgram->getVertexInputDesc(rhi::VertexSemantic::POSITION);
+    auto idDesc  = _renderProgram->getVertexInputDesc(rhi::VertexSemantic::TEXCOORD0);
+    if (!posDesc || !idDesc)
+        return true;
+    layoutDesc.addAttrib(posDesc, rhi::VertexElementType::FLOAT3, 0, false);
+    layoutDesc.addAttrib(idDesc, rhi::VertexElementType::FLOAT, 12, false);
     layoutDesc.endLayout(16);
     _vertexLayout = device->createVertexLayout(std::move(layoutDesc));
 
