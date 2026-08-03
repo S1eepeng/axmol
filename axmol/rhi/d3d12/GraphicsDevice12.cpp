@@ -559,6 +559,11 @@ Buffer* GraphicsDeviceImpl::createBuffer(size_t size, BufferType type, BufferUsa
     return new BufferImpl(this, size, type, usage, initial);
 }
 
+Buffer* GraphicsDeviceImpl::createBuffer(const BufferDesc& desc, const void* initial)
+{
+    return new BufferImpl(this, desc.size, desc.type, desc.usage, initial, desc.stride);
+}
+
 Texture* GraphicsDeviceImpl::createTexture(const TextureDesc& descriptor, std::optional<Color> clearColorHint)
 {
     return new TextureImpl(this, descriptor, clearColorHint);
@@ -598,6 +603,11 @@ RenderPipeline* GraphicsDeviceImpl::createRenderPipeline()
 Program* GraphicsDeviceImpl::createProgram(Data vsData, Data fsData)
 {
     return new ProgramImpl(vsData, fsData);
+}
+
+Program* GraphicsDeviceImpl::createComputeProgram(Data csData)
+{
+    return new ProgramImpl(csData);
 }
 
 ShaderModule* GraphicsDeviceImpl::createShaderModule(ShaderStage stage, Data& chunk)

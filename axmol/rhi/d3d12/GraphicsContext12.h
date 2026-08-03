@@ -41,6 +41,7 @@ namespace ax::rhi::d3d12
 
 class GraphicsDeviceImpl;
 class RenderTargetImpl;
+class ComputePipelineImpl;
 
 enum class DynamicStateBits : uint32_t
 {
@@ -128,6 +129,8 @@ public:
 
     bool copyTexture(RenderTarget* src, Texture* dst) override;
     bool copyTexture(Texture* src, Texture* dst) override;
+
+    bool dispatch(const ComputeDispatchDesc& desc) override;
 
     void setStencilReferenceValue(uint32_t value) override;
 
@@ -233,6 +236,9 @@ private:
     BufferImpl* _vertexBuffer{nullptr};
     BufferImpl* _indexBuffer{nullptr};
     BufferImpl* _instanceBuffer{nullptr};
+
+    // Compute pipelines cached per program id.
+    tlx::hash_map<uint64_t, ComputePipelineImpl*> _computePipelines;
 
     std::vector<std::function<void(uint64_t)>> _frameCompletionOps;
 

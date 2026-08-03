@@ -82,13 +82,22 @@ size_t BufferImpl::alignTo(size_t value, size_t alignment)
 }
 
 /* -------------------------------------------------- ctor */
-BufferImpl::BufferImpl(GraphicsDeviceImpl* driver, size_t size, BufferType type, BufferUsage usage, const void* initial)
-    : Buffer(size, type, usage), _driver(driver)
+BufferImpl::BufferImpl(GraphicsDeviceImpl* driver,
+                       size_t size,
+                       BufferType type,
+                       BufferUsage usage,
+                       const void* initial,
+                       uint32_t stride)
+    : Buffer(size, type, usage, stride), _driver(driver)
 {
     AXASSERT(_driver, "GraphicsDeviceImpl must not be null");
 
     _resourceFlags = translateResourceFlags(type);
     _heapType      = (usage == BufferUsage::DYNAMIC) ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_DEFAULT;
+
+    // D3D12 forbids UAV access on UPLOAD heap resources; storage buffers must live in DEFAULT heap.
+    if (type == BufferType::STORAGE)
+        _heapType = D3D12_HEAP_TYPE_DEFAULT;
 
     _capacity = (type == BufferType::UNIFORM) ? alignTo(size, 256) : size;  // CB size must be 256-byte aligned in D3D12
 
@@ -101,6 +110,11 @@ BufferImpl::BufferImpl(GraphicsDeviceImpl* driver, size_t size, BufferType type,
 
 BufferImpl::~BufferImpl()
 {
+    if (_srv)
+        _driver->queueDisposal(_srv, DisposableResource::Type::ShaderResourceView, _lastFenceValue);
+    if (_uav)
+        _driver->queueDisposal(_uav, DisposableResource::Type::ShaderResourceView, _lastFenceValue);
+
     // If we allocated per-frame dynamic upload resources, detach and queue disposal for each.
     if (!_dynamicResources.empty())
     {
@@ -117,6 +131,72 @@ BufferImpl::~BufferImpl()
         if (_resource)
             _driver->queueDisposal(_resource.Detach(), _lastFenceValue);
     }
+}
+
+void BufferImpl::createViews() const
+{
+    if (!_resource)
+        return;
+
+    auto* device = _driver->getDevice();
+
+    if (_resourceFlags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)
+    {
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+        uavDesc.ViewDimension     = D3D12_UAV_DIMENSION_BUFFER;
+        uavDesc.Buffer.FirstElement = 0;
+        uavDesc.Buffer.Flags        = static_cast<D3D12_BUFFER_UAV_FLAGS>(0);
+        if (_stride != 0)
+        {
+            uavDesc.Format                     = DXGI_FORMAT_UNKNOWN;
+            uavDesc.Buffer.NumElements         = static_cast<UINT>(_capacity / _stride);
+            uavDesc.Buffer.StructureByteStride = _stride;
+        }
+        else
+        {
+            uavDesc.Format             = DXGI_FORMAT_R32_UINT;
+            uavDesc.Buffer.NumElements = static_cast<UINT>(_capacity / 4);
+        }
+        _uav = _driver->allocateDescriptor(DisposableResource::Type::ShaderResourceView);
+        if (_uav)
+            device->CreateUnorderedAccessView(_resource.Get(), nullptr, &uavDesc, _uav->cpu);
+    }
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    if (_stride != 0)
+    {
+        srvDesc.Format                        = DXGI_FORMAT_UNKNOWN;
+        srvDesc.Buffer.FirstElement           = 0;
+        srvDesc.Buffer.NumElements            = static_cast<UINT>(_capacity / _stride);
+        srvDesc.Buffer.StructureByteStride    = _stride;
+        srvDesc.Shader4ComponentMapping       = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    }
+    else
+    {
+        srvDesc.Format                  = DXGI_FORMAT_R32_UINT;
+        srvDesc.Buffer.FirstElement     = 0;
+        srvDesc.Buffer.NumElements      = static_cast<UINT>(_capacity / 4);
+        srvDesc.Buffer.StructureByteStride = 0;
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    }
+    _srv = _driver->allocateDescriptor(DisposableResource::Type::ShaderResourceView);
+    if (_srv)
+        device->CreateShaderResourceView(_resource.Get(), &srvDesc, _srv->cpu);
+}
+
+const DescriptorHandle* BufferImpl::getSRV() const
+{
+    if (!_srv && _resource)
+        createViews();
+    return _srv;
+}
+
+const DescriptorHandle* BufferImpl::getUAV() const
+{
+    if (!_uav && _resource)
+        createViews();
+    return _uav;
 }
 
 /* -------------------------------------------------- createNativeBuffer */

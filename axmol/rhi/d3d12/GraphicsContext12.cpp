@@ -30,6 +30,8 @@
 #include "axmol/rhi/d3d12/Program12.h"
 #include "axmol/rhi/d3d12/Buffer12.h"
 #include "axmol/rhi/d3d12/Texture12.h"
+#include "axmol/rhi/d3d12/ComputePipeline12.h"
+#include "axmol/rhi/SamplerRegistry.h"
 #include "axmol/base/Logging.h"
 #include "axmol/math/MathUtil.h"
 
@@ -252,6 +254,10 @@ GraphicsContextImpl::GraphicsContextImpl(GraphicsDeviceImpl* driver, SurfaceHand
 GraphicsContextImpl::~GraphicsContextImpl()
 {
     _driver->waitForGPU();
+
+    for (auto& [_, computePipeline] : _computePipelines)
+        delete computePipeline;
+    _computePipelines.clear();
 
     AX_SAFE_RELEASE_NULL(_screenRT);
     AX_SAFE_RELEASE_NULL(_renderPipeline);
@@ -1071,6 +1077,183 @@ void GraphicsContextImpl::removeCachedPipelineObjects(Program* key)
 {
     if (_renderPipeline)
         _renderPipeline->removeCachedObjects(key);
+
+    auto it = _computePipelines.find(key->getProgramId());
+    if (it != _computePipelines.end())
+    {
+        delete it->second;
+        _computePipelines.erase(it);
+    }
+}
+
+bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
+{
+    if (!_inFrame || !_currentCmdList)
+        return false;
+    if (!desc.programState)
+        return false;
+
+    auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
+    if (!program || !program->getCSModule())
+        return false;
+
+    _programState = desc.programState;
+
+    auto& computePipeline = _computePipelines[program->getProgramId()];
+    if (!computePipeline)
+        computePipeline = new ComputePipelineImpl(_driver, program);
+    if (!computePipeline->getPipeline())
+        return false;
+
+    auto* cmd = _currentCmdList;
+    cmd->SetComputeRootSignature(computePipeline->getRootSignature());
+    cmd->SetPipelineState(computePipeline->getPipeline());
+
+    // Bind uniform blocks via CBV root parameters.
+    auto& callbackUniforms = desc.programState->getCallbackUniforms();
+    for (auto& cb : callbackUniforms)
+        cb.second(_programState, cb.first);
+
+    const auto& cpuBuffer = desc.programState->getUniformBuffer();
+    if (!cpuBuffer.empty())
+    {
+        for (auto& uboInfo : desc.programState->getActiveUniformBlockInfos())
+        {
+            auto s = allocateUniformSlice(_frameIndex, uboInfo.sizeBytes);
+            ::memcpy(s.cpuPtr, cpuBuffer.data() + uboInfo.cpuOffset, uboInfo.sizeBytes);
+            cmd->SetComputeRootConstantBufferView(uboInfo.binding, s.gpuVA);
+        }
+    }
+
+    auto srvHeap     = _srvHeaps[_frameIndex].Get();
+    auto srvCpuStart = srvHeap->GetCPUDescriptorHandleForHeapStart();
+    auto srvGpuStart = srvHeap->GetGPUDescriptorHandleForHeapStart();
+    const auto srvStride = _driver->getSrvDescriptorStride();
+
+    const UINT bindingStart = _srvOffset[_frameIndex];
+    UINT slot               = 0;
+
+    // Copy SRV descriptors (textures + read-only storage buffers) in root-signature range order.
+    for (const auto& [bindingIndex, bindingSet] : desc.programState->getTextureBindingSets())
+    {
+        for (auto tex : bindingSet.texs)
+        {
+            auto textureImpl = static_cast<TextureImpl*>(tex);
+            textureImpl->setLastFenceValue(_frameFenceValue);
+            auto srvHandle = textureImpl->internalHandle().srv;
+            if (!srvHandle)
+                continue;
+
+            D3D12_CPU_DESCRIPTOR_HANDLE dst = srvCpuStart;
+            dst.ptr += (bindingStart + slot) * srvStride;
+            _device->CopyDescriptorsSimple(1, dst, srvHandle->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            ++slot;
+        }
+    }
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_ONLY)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        auto srvHandle  = bufferImpl->getSRV();
+        if (!srvHandle)
+            continue;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE dst = srvCpuStart;
+        dst.ptr += (bindingStart + slot) * srvStride;
+        _device->CopyDescriptorsSimple(1, dst, srvHandle->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        ++slot;
+    }
+    const UINT srvCount = slot;
+
+    // Copy UAV descriptors (read-write storage buffers).
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_WRITE)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        auto uavHandle  = bufferImpl->getUAV();
+        if (!uavHandle)
+            continue;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE dst = srvCpuStart;
+        dst.ptr += (bindingStart + slot) * srvStride;
+        _device->CopyDescriptorsSimple(1, dst, uavHandle->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        ++slot;
+    }
+    const UINT uavCount = slot - srvCount;
+
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuBase = srvGpuStart;
+    gpuBase.ptr += static_cast<UINT64>(bindingStart) * srvStride;
+
+    if (computePipeline->srvRootIndex() != UINT_MAX && srvCount > 0)
+        cmd->SetComputeRootDescriptorTable(computePipeline->srvRootIndex(), gpuBase);
+    if (computePipeline->uavRootIndex() != UINT_MAX && uavCount > 0)
+    {
+        D3D12_GPU_DESCRIPTOR_HANDLE uavGpu = gpuBase;
+        uavGpu.ptr += static_cast<UINT64>(srvCount) * srvStride;
+        cmd->SetComputeRootDescriptorTable(computePipeline->uavRootIndex(), uavGpu);
+    }
+
+    // Samplers.
+    if (computePipeline->samplerRootIndex() != UINT_MAX)
+    {
+        const auto samplerGpuStart = _driver->getSamplerHeap()->GetGPUDescriptorHandleForHeapStart();
+        cmd->SetComputeRootDescriptorTable(computePipeline->samplerRootIndex(), samplerGpuStart);
+    }
+    if (computePipeline->customSamplerRootIndex() != UINT_MAX)
+    {
+        D3D12_GPU_DESCRIPTOR_HANDLE customGpuHandle;
+        if (computePipeline->customSamplerBatch())
+            customGpuHandle = computePipeline->customSamplerBatch()->gpu;
+        else
+            customGpuHandle = _driver->getSamplerHeap()->GetGPUDescriptorHandleForHeapStart();
+        cmd->SetComputeRootDescriptorTable(computePipeline->customSamplerRootIndex(), customGpuHandle);
+    }
+
+    // Transition storage buffers to their bind state.
+    tlx::pod_vector<D3D12_RESOURCE_BARRIER> barriers;
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer)
+            continue;
+        auto bufferImpl    = static_cast<BufferImpl*>(bindingSet.buffer);
+        auto targetState   = bindingSet.access == BufferAccess::READ_WRITE ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+                                                                           : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        if (bufferImpl->currentState() != targetState)
+        {
+            D3D12_RESOURCE_BARRIER& bar = barriers.emplace_back();
+            bar.Type                    = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            bar.Transition.pResource    = bufferImpl->internalResource();
+            bar.Transition.StateBefore  = bufferImpl->currentState();
+            bar.Transition.StateAfter   = targetState;
+            bar.Transition.Subresource  = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            bufferImpl->_resourceState  = targetState;
+        }
+    }
+    if (!barriers.empty())
+        cmd->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+
+    cmd->Dispatch(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
+
+    // UAV barrier: make compute writes visible to subsequent compute/vertex/fragment reads.
+    tlx::pod_vector<D3D12_RESOURCE_BARRIER> postBarriers;
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_WRITE)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        D3D12_RESOURCE_BARRIER& bar = postBarriers.emplace_back();
+        bar.Type                    = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        bar.UAV.pResource           = bufferImpl->internalResource();
+    }
+    if (!postBarriers.empty())
+        cmd->ResourceBarrier(static_cast<UINT>(postBarriers.size()), postBarriers.data());
+
+    _srvOffset[_frameIndex] = bindingStart + srvCount + uavCount;
+
+    _programState = nullptr;
+    return true;
 }
 
 bool GraphicsContextImpl::copyTexture(Texture* src, Texture* dst)

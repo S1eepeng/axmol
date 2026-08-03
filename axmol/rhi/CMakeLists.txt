@@ -146,8 +146,9 @@ if(AX_ENABLE_D3D12)
     rhi/d3d12/Texture12.h
     rhi/d3d12/Program12.h
     rhi/d3d12/VertexLayout12.h
-    rhi/d3d12/DescriptorHeapAllocator12.h
-    rhi/d3d12/UploadBufferAllocator12.h
+rhi/d3d12/DescriptorHeapAllocator12.h
+rhi/d3d12/UploadBufferAllocator12.h
+rhi/d3d12/ComputePipeline12.h
     rhi/DXUtils.h
   )
 
@@ -162,8 +163,9 @@ if(AX_ENABLE_D3D12)
     rhi/d3d12/Texture12.cpp
     rhi/d3d12/Program12.cpp
     rhi/d3d12/VertexLayout12.cpp
-    rhi/d3d12/DescriptorHeapAllocator12.cpp
-    rhi/d3d12/UploadBufferAllocator12.cpp
+rhi/d3d12/DescriptorHeapAllocator12.cpp
+rhi/d3d12/UploadBufferAllocator12.cpp
+rhi/d3d12/ComputePipeline12.cpp
     rhi/DXUtils.cpp
   )
 endif()
