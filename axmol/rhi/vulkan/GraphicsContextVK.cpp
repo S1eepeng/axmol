@@ -1161,7 +1161,14 @@ void GraphicsContextImpl::prepareDrawing()
             if (!samplerInfo.samplerId)
                 continue;
 
-            auto samplerHandle = SamplerRegistry::getInstance()->getSampler(samplerInfo.samplerId);
+            auto samplerId = samplerInfo.samplerId;
+            if (samplerInfo.presetIndex < 0)
+            {
+                if (auto overrideId = _programState->getSamplerOverride(samplerInfo.binding))
+                    samplerId = overrideId;
+            }
+
+            auto samplerHandle = SamplerRegistry::getInstance()->getSampler(samplerId);
             if (!samplerHandle)
                 continue;
 

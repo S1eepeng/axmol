@@ -513,7 +513,17 @@ bool GraphicsDeviceImpl::initializeDevice()
     _caps.maxAttributes     = static_cast<int32_t>(MAX_VERTEX_ATTRIBS);  // pipeline-defined
     _caps.maxTextureUnits   = 32;  // conservative default; descriptor count varies per layout
     _caps.maxTextureSize    = static_cast<int32_t>(props.limits.maxImageDimension2D);
+    _caps.maxTexture3DSize  = static_cast<int32_t>(props.limits.maxImageDimension3D);
     _caps.maxSamplesAllowed = static_cast<int32_t>(props.limits.framebufferColorSampleCounts);
+    _caps.maxComputeWorkGroupCount[0] = static_cast<int>(props.limits.maxComputeWorkGroupCount[0]);
+    _caps.maxComputeWorkGroupCount[1] = static_cast<int>(props.limits.maxComputeWorkGroupCount[1]);
+    _caps.maxComputeWorkGroupCount[2] = static_cast<int>(props.limits.maxComputeWorkGroupCount[2]);
+    _caps.maxComputeWorkGroupSize[0] = static_cast<int>(props.limits.maxComputeWorkGroupSize[0]);
+    _caps.maxComputeWorkGroupSize[1] = static_cast<int>(props.limits.maxComputeWorkGroupSize[1]);
+    _caps.maxComputeWorkGroupSize[2] = static_cast<int>(props.limits.maxComputeWorkGroupSize[2]);
+    _caps.maxComputeWorkGroupInvocations = static_cast<int>(props.limits.maxComputeWorkGroupInvocations);
+    _caps.maxStorageBufferBindings = static_cast<int>(props.limits.maxPerStageDescriptorStorageBuffers);
+    _caps.maxStorageBufferSize = static_cast<size_t>(props.limits.maxStorageBufferRange);
 
     // Query device properties
     // Optional: query extended dynamic state 3 properties only if extension is supported
@@ -926,6 +936,15 @@ bool GraphicsDeviceImpl::checkForFeatureSupported(FeatureType feature)
         vkGetPhysicalDeviceFormatProperties(_physical, VK_FORMAT_ASTC_4x4_UNORM_BLOCK, &fp);
         return (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
     }
+
+    case FeatureType::COMPUTE_SHADER:
+        return _caps.maxComputeWorkGroupInvocations > 0;
+
+    case FeatureType::STORAGE_BUFFER:
+        return _caps.maxStorageBufferBindings > 0 && _caps.maxStorageBufferSize > 0;
+
+    case FeatureType::TEXTURE_3D:
+        return _caps.maxTexture3DSize > 0;
 
     default:
         return false;

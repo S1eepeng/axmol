@@ -703,7 +703,14 @@ void GraphicsContextImpl::prepareDrawing()
             continue;
         }
 
-        auto sampler = static_cast<ID3D11SamplerState*>(samplerRegistry->getSampler(samplerInfo.samplerId));
+        auto samplerId = samplerInfo.samplerId;
+        if (samplerInfo.presetIndex < 0)
+        {
+            if (auto overrideId = _programState->getSamplerOverride(samplerInfo.binding))
+                samplerId = overrideId;
+        }
+
+        auto sampler = static_cast<ID3D11SamplerState*>(samplerRegistry->getSampler(samplerId));
         if (!sampler)
             continue;
 

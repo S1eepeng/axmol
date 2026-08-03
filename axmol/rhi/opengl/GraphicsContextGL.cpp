@@ -405,6 +405,12 @@ void GraphicsContextImpl::bindUniforms(ProgramImpl* program) const
             for (const auto& [bindingIndex, bindingSet] : _programState->getTextureBindingSets())
             {
                 auto samplerId = program->getTextureSampler(bindingIndex);
+                auto samplerLocation = program->getTextureSamplerLocation(bindingIndex);
+                if (samplerLocation && samplerLocation.space == axslc::kCustomSamplerDescriptorSet)
+                {
+                    if (auto overrideId = _programState->getSamplerOverride(samplerLocation.binding))
+                        samplerId = overrideId;
+                }
                 if (!samplerId)
                     continue;
 

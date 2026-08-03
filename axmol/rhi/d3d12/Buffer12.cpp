@@ -39,6 +39,8 @@ static D3D12_RESOURCE_FLAGS translateResourceFlags(BufferType t)
     case BufferType::INDEX:
     case BufferType::UNIFORM:
         return D3D12_RESOURCE_FLAG_NONE;
+    case BufferType::STORAGE:
+        return D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     case BufferType::PIXEL_PACK_BUFFER:  // readback
         return D3D12_RESOURCE_FLAG_NONE;
     default:
@@ -64,6 +66,8 @@ static D3D12_RESOURCE_STATES translateInitialState(BufferType t, BufferUsage usa
         return D3D12_RESOURCE_STATE_INDEX_BUFFER;
     case BufferType::UNIFORM:
         return D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+    case BufferType::STORAGE:
+        return D3D12_RESOURCE_STATE_COMMON;
     case BufferType::PIXEL_PACK_BUFFER:
         // If used as copy destination for readback, start COMMON and transition when needed
         return D3D12_RESOURCE_STATE_COMMON;

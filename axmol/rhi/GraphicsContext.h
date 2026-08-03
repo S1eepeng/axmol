@@ -50,6 +50,13 @@ class DepthStencilState;
 class Texture;
 class RenderTarget;
 struct DepthStencilDesc;
+struct ComputeDispatchDesc
+{
+    ProgramState* programState = nullptr;
+    uint32_t groupCountX       = 1;
+    uint32_t groupCountY       = 1;
+    uint32_t groupCountZ       = 1;
+};
 
 /**
  * @addtogroup _rhi
@@ -256,6 +263,8 @@ public:
      * @return true if the copy command was successfully issued; otherwise false.
      */
     virtual bool copyTexture(RenderTarget* src, Texture* dst) = 0;
+
+    virtual bool dispatch(const ComputeDispatchDesc& desc);
 
     /**
      * This property controls whether or not the drawables'

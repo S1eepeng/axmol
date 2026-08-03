@@ -549,7 +549,14 @@ void GraphicsContextImpl::setTexturesAndSamplers() const
         if (!samplerInfo.samplerId || samplerInfo.binding < 0 || samplerInfo.count == 0)
             continue;
 
-        const auto sampler      = samplerRegistry->getSampler(samplerInfo.samplerId);
+        auto samplerId = samplerInfo.samplerId;
+        if (samplerInfo.presetIndex < 0)
+        {
+            if (auto overrideId = _programState->getSamplerOverride(samplerInfo.binding))
+                samplerId = overrideId;
+        }
+
+        const auto sampler      = samplerRegistry->getSampler(samplerId);
         const auto samplerState = static_cast<id<MTLSamplerState>>(sampler);
 
         if (samplerState == nil)

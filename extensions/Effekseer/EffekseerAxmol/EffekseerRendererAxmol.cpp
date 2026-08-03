@@ -54,6 +54,35 @@ float ToSamplerMode(Effekseer::TextureFilterType filter, Effekseer::TextureWrapT
     return repeat ? 1.0f : 0.0f;
 }
 
+ax::rhi::SamplerDesc ToSamplerDesc(Effekseer::TextureFilterType filter, Effekseer::TextureWrapType wrap)
+{
+    ax::rhi::SamplerDesc samplerDesc;
+    if (filter == Effekseer::TextureFilterType::Nearest)
+    {
+        samplerDesc.minFilter = ax::rhi::SamplerFilter::MIN_NEAREST;
+        samplerDesc.magFilter = ax::rhi::SamplerFilter::MAG_NEAREST;
+    }
+
+    switch (wrap)
+    {
+    case Effekseer::TextureWrapType::Repeat:
+        samplerDesc.sAddressMode = ax::rhi::SamplerAddressMode::REPEAT;
+        samplerDesc.tAddressMode = ax::rhi::SamplerAddressMode::REPEAT;
+        break;
+    case Effekseer::TextureWrapType::Mirror:
+        samplerDesc.sAddressMode = ax::rhi::SamplerAddressMode::MIRROR;
+        samplerDesc.tAddressMode = ax::rhi::SamplerAddressMode::MIRROR;
+        break;
+    case Effekseer::TextureWrapType::Clamp:
+    default:
+        samplerDesc.sAddressMode = ax::rhi::SamplerAddressMode::CLAMP;
+        samplerDesc.tAddressMode = ax::rhi::SamplerAddressMode::CLAMP;
+        break;
+    }
+
+    return samplerDesc;
+}
+
 class AxVertexBuffer : public Effekseer::Backend::VertexBuffer
 {
 public:
@@ -171,6 +200,44 @@ public:
     std::vector<uint8_t> data;
 };
 
+class AxStorageBuffer : public Effekseer::Backend::StorageBuffer
+{
+public:
+    AxStorageBuffer(ax::rhi::Buffer* buffer, int32_t elementCount, int32_t elementSize, const void* initialData)
+        : _buffer(buffer), _shadow(static_cast<size_t>(elementCount) * static_cast<size_t>(elementSize))
+    {
+        if (_buffer)
+            _buffer->retain();
+        if (initialData && !_shadow.empty())
+            memcpy(_shadow.data(), initialData, _shadow.size());
+        if (_buffer && !_shadow.empty())
+            _buffer->updateData(_shadow.data(), _shadow.size());
+    }
+
+    ~AxStorageBuffer() override { AX_SAFE_RELEASE(_buffer); }
+
+    bool updateData(const void* src, int32_t size, int32_t offset)
+    {
+        if (!_buffer || !src || size <= 0 || offset < 0)
+            return false;
+
+        const auto dstOffset = static_cast<size_t>(offset);
+        const auto dstSize = static_cast<size_t>(size);
+        if (dstOffset + dstSize > _shadow.size())
+            return false;
+
+        memcpy(_shadow.data() + dstOffset, src, dstSize);
+        _buffer->updateSubData(src, dstOffset, dstSize);
+        return true;
+    }
+
+    ax::rhi::Buffer* get() const { return _buffer; }
+
+private:
+    ax::rhi::Buffer* _buffer = nullptr;
+    std::vector<uint8_t> _shadow;
+};
+
 class AxPipelineState : public Effekseer::Backend::PipelineState
 {
 public:
@@ -239,6 +306,35 @@ public:
             ub->data.resize(offset + size);
         memcpy(ub->data.data() + offset, data, size);
         return true;
+    }
+
+    Effekseer::Backend::StorageBufferRef CreateStorageBuffer(int32_t elementCount,
+                                                             int32_t elementSize,
+                                                             const void* initialData,
+                                                             Effekseer::Backend::StorageBufferUsage usage) override
+    {
+        if (elementCount <= 0 || elementSize <= 0)
+            return nullptr;
+
+        ax::rhi::BufferDesc desc;
+        desc.size = static_cast<size_t>(elementCount) * static_cast<size_t>(elementSize);
+        desc.stride = static_cast<uint32_t>(elementSize);
+        desc.type = ax::rhi::BufferType::STORAGE;
+        desc.usage = usage == Effekseer::Backend::StorageBufferUsage::ReadOnly ? ax::rhi::BufferUsage::STATIC
+                                                                               : ax::rhi::BufferUsage::DYNAMIC;
+        desc.access = usage == Effekseer::Backend::StorageBufferUsage::ReadOnly ? ax::rhi::BufferAccess::READ_ONLY
+                                                                                : ax::rhi::BufferAccess::READ_WRITE;
+
+        auto buffer = ax::rhi::GraphicsCore::device()->createBuffer(desc, initialData);
+        auto ret = Effekseer::MakeRefPtr<AxStorageBuffer>(buffer, elementCount, elementSize, initialData);
+        AX_SAFE_RELEASE(buffer);
+        return ret;
+    }
+
+    bool UpdateStorageBuffer(Effekseer::Backend::StorageBufferRef& buffer, int32_t size, int32_t offset, const void* data) override
+    {
+        auto storageBuffer = buffer.DownCast<AxStorageBuffer>();
+        return storageBuffer ? storageBuffer->updateData(data, size, offset) : false;
     }
 
     Effekseer::Backend::PipelineStateRef CreatePipelineState(const Effekseer::Backend::PipelineStateParameter& param) override
@@ -416,6 +512,15 @@ public:
         _textureLocations[5] = _programState->getUniformLocation("u_tex5");
         _textureLocations[6] = _programState->getUniformLocation("u_tex6");
         _textureLocations[7] = _programState->getUniformLocation("u_tex7");
+
+        _samplerLocations[0] = _program->getSamplerLocation("sampler_colorTex");
+        _samplerLocations[1] = _program->getSamplerLocation(isDistortion ? "sampler_backTex" : "sampler_normalTex");
+        _samplerLocations[2] = _program->getSamplerLocation("sampler_alphaTex");
+        _samplerLocations[3] = _program->getSamplerLocation("sampler_uvDistortionTex");
+        _samplerLocations[4] = _program->getSamplerLocation("sampler_blendTex");
+        _samplerLocations[5] = _program->getSamplerLocation("sampler_blendAlphaTex");
+        _samplerLocations[6] = _program->getSamplerLocation("sampler_blendUVDistortionTex");
+        _samplerLocations[7] = _program->getSamplerLocation("sampler_depthTex");
     }
 
     ~Shader() override
@@ -532,6 +637,14 @@ public:
             _programState->setTexture(_textureLocations[slot], slot, texture);
     }
 
+    bool setSampler(int slot, const ax::rhi::SamplerDesc& samplerDesc)
+    {
+        if (slot < 0 || slot >= 8 || !_samplerLocations[slot])
+            return false;
+        _programState->setSampler(_samplerLocations[slot], samplerDesc);
+        return true;
+    }
+
     void setDefaultTextures(ax::rhi::Texture* texture)
     {
         if (!texture)
@@ -586,6 +699,7 @@ private:
     ax::rhi::UniformLocation _miscFlagsLocation;
 
     ax::rhi::UniformLocation _textureLocations[8];
+    ax::rhi::SamplerLocation _samplerLocations[8];
 };
 
 namespace
@@ -899,31 +1013,9 @@ void Renderer::SetTextures(EffekseerRenderer::ShaderBase* shaderBase, Effekseer:
         auto texture = textures[i].DownCast<AxTexture>();
         if (texture && texture->get())
         {
-            ax::rhi::SamplerDesc samplerDesc;
-            if (state.TextureFilterTypes[i] == Effekseer::TextureFilterType::Nearest)
-            {
-                samplerDesc.minFilter = ax::rhi::SamplerFilter::MIN_NEAREST;
-                samplerDesc.magFilter = ax::rhi::SamplerFilter::MAG_NEAREST;
-            }
-
-            switch (state.TextureWrapTypes[i])
-            {
-            case Effekseer::TextureWrapType::Repeat:
-                samplerDesc.sAddressMode = ax::rhi::SamplerAddressMode::REPEAT;
-                samplerDesc.tAddressMode = ax::rhi::SamplerAddressMode::REPEAT;
-                break;
-            case Effekseer::TextureWrapType::Mirror:
-                samplerDesc.sAddressMode = ax::rhi::SamplerAddressMode::MIRROR;
-                samplerDesc.tAddressMode = ax::rhi::SamplerAddressMode::MIRROR;
-                break;
-            case Effekseer::TextureWrapType::Clamp:
-            default:
-                samplerDesc.sAddressMode = ax::rhi::SamplerAddressMode::CLAMP;
-                samplerDesc.tAddressMode = ax::rhi::SamplerAddressMode::CLAMP;
-                break;
-            }
-
-            texture->get()->updateSamplerDesc(samplerDesc);
+            auto samplerDesc = ToSamplerDesc(state.TextureFilterTypes[i], state.TextureWrapTypes[i]);
+            if (!shader->setSampler(i, samplerDesc))
+                texture->get()->updateSamplerDesc(samplerDesc);
             shader->setTexture(i, texture->get());
         }
     }

@@ -429,6 +429,16 @@ bool GraphicsDeviceImpl::init()
     _caps.maxSamplesAllowed = getMaxSamplerEntries(_featureSet);
     _caps.maxTextureUnits   = getMaxTextureEntries(_featureSet);
     _caps.maxTextureSize    = getMaxTextureWidthHeight(_featureSet);
+    _caps.maxTexture3DSize  = _caps.maxTextureSize;
+    _caps.maxComputeWorkGroupCount[0] = 65535;
+    _caps.maxComputeWorkGroupCount[1] = 65535;
+    _caps.maxComputeWorkGroupCount[2] = 65535;
+    _caps.maxComputeWorkGroupSize[0] = 1024;
+    _caps.maxComputeWorkGroupSize[1] = 1024;
+    _caps.maxComputeWorkGroupSize[2] = 64;
+    _caps.maxComputeWorkGroupInvocations = 1024;
+    _caps.maxStorageBufferBindings = 31;
+    _caps.maxStorageBufferSize = 256ull * 1024ull * 1024ull;
 
     return true;
 }
@@ -645,6 +655,11 @@ bool GraphicsDeviceImpl::checkForFeatureSupported(FeatureType feature)
         break;
     case FeatureType::ASTC:
         featureSupported = supportASTC(_featureSet);
+        break;
+    case FeatureType::COMPUTE_SHADER:
+    case FeatureType::STORAGE_BUFFER:
+    case FeatureType::TEXTURE_3D:
+        featureSupported = true;
         break;
     default:
         break;

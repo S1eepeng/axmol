@@ -133,6 +133,30 @@ bool GraphicsDeviceImpl::init()
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &_caps.maxAttributes);
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &_caps.maxTextureSize);
     glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &_caps.maxTextureUnits);
+    glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &_caps.maxTexture3DSize);
+
+#if !AX_GLES_PROFILE
+    if (_verInfo.major > 4 || (_verInfo.major == 4 && _verInfo.minor >= 3))
+#else
+    if (_verInfo.major > 3 || (_verInfo.major == 3 && _verInfo.minor >= 1))
+#endif
+    {
+#if defined(GL_MAX_COMPUTE_WORK_GROUP_COUNT) && defined(GL_MAX_COMPUTE_WORK_GROUP_SIZE) && \
+    defined(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS) && defined(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS) && \
+    defined(GL_MAX_SHADER_STORAGE_BLOCK_SIZE)
+        glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &_caps.maxComputeWorkGroupCount[0]);
+        glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 1, &_caps.maxComputeWorkGroupCount[1]);
+        glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 2, &_caps.maxComputeWorkGroupCount[2]);
+        glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0, &_caps.maxComputeWorkGroupSize[0]);
+        glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 1, &_caps.maxComputeWorkGroupSize[1]);
+        glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 2, &_caps.maxComputeWorkGroupSize[2]);
+        glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &_caps.maxComputeWorkGroupInvocations);
+        glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &_caps.maxStorageBufferBindings);
+        GLint64 maxStorageBlockSize = 0;
+        glGetInteger64v(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &maxStorageBlockSize);
+        _caps.maxStorageBufferSize = static_cast<size_t>(maxStorageBlockSize);
+#endif
+    }
 
     // exts
     GL_EnumAllExtensions([this](const std::string_view& ext) {
@@ -684,6 +708,21 @@ bool GraphicsDeviceImpl::checkForFeatureSupported(FeatureType feature)
         break;
     case FeatureType::VERTEX_ATTRIB_BINDING:
         featureSupported = _cap.vertexAttribBinding;
+        break;
+    case FeatureType::COMPUTE_SHADER:
+#if !AX_GLES_PROFILE
+        featureSupported = (_verInfo.major > 4 || (_verInfo.major == 4 && _verInfo.minor >= 3)) &&
+                           _caps.maxComputeWorkGroupInvocations > 0;
+#else
+        featureSupported = (_verInfo.major > 3 || (_verInfo.major == 3 && _verInfo.minor >= 1)) &&
+                           _caps.maxComputeWorkGroupInvocations > 0;
+#endif
+        break;
+    case FeatureType::STORAGE_BUFFER:
+        featureSupported = checkForFeatureSupported(FeatureType::COMPUTE_SHADER) && _caps.maxStorageBufferBindings > 0;
+        break;
+    case FeatureType::TEXTURE_3D:
+        featureSupported = _caps.maxTexture3DSize > 0;
         break;
     default:
         break;

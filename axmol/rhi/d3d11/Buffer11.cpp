@@ -63,6 +63,9 @@ static D3D11_BIND_FLAG translateBindFlag(BufferType t)
     case BufferType::UNIFORM:
         return D3D11_BIND_CONSTANT_BUFFER;
 
+    case BufferType::STORAGE:
+        return static_cast<D3D11_BIND_FLAG>(D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS);
+
     case BufferType::PIXEL_PACK_BUFFER:
         // read backbuffer，map as staging or copy target
         return D3D11_BIND_SHADER_RESOURCE;  // FIXME:

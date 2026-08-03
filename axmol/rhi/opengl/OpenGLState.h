@@ -8,6 +8,10 @@
 
 #define AX_ENABLE_STATE_GUARD 1
 
+#ifndef GL_SHADER_STORAGE_BUFFER
+#    define GL_SHADER_STORAGE_BUFFER 0x90D2
+#endif
+
 // Inline opengl state set calls
 
 namespace ax::rhi::gl
@@ -117,6 +121,7 @@ struct AX_DLL OpenGLState
         GL_ELEMENT_ARRAY_BUFFER,  // INDEX of VAO
         GL_UNIFORM_BUFFER,        // UNIFORM
         GL_PIXEL_PACK_BUFFER,     // PIXEL
+        GL_SHADER_STORAGE_BUFFER, // STORAGE
     };
 
     constexpr static int MAX_VERTEX_ATTRIBS = 16;

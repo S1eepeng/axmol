@@ -148,6 +148,9 @@ static VkBufferUsageFlags translateBindFlag(BufferType t)
     case BufferType::UNIFORM:
         return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 
+    case BufferType::STORAGE:
+        return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
     case BufferType::PIXEL_PACK_BUFFER:
         // read backbuffer, map as staging or copy target
         return VK_BUFFER_USAGE_TRANSFER_DST_BIT;
