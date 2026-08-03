@@ -70,6 +70,8 @@ public:
      */
     Buffer* createBuffer(size_t size, BufferType type, BufferUsage usage, const void* initial) override;
 
+    Buffer* createBuffer(const BufferDesc& desc, const void* initial = nullptr) override;
+
     /**
      * Create a Texture object.
      * @param descriptor Specifies texture description.
@@ -99,6 +101,8 @@ public:
      * @return A Program instance.
      */
     Program* createProgram(Data vsData, Data fsData) override;
+
+    Program* createComputeProgram(Data csData) override;
 
     VertexLayout* createVertexLayout(VertexLayoutDesc&& desc) override;
 

@@ -87,11 +87,20 @@ BufferImpl::BufferImpl(ID3D11Device* device,
                        size_t size,
                        BufferType type,
                        BufferUsage usage,
-                       const void* initial)
-    : Buffer(size, type, usage), _device(device), _context(context)
+                       const void* initial,
+                       uint32_t stride)
+    : Buffer(size, type, usage, stride), _device(device), _context(context)
 {
     translateUsage(usage, _nativeUsage, _cpuAccess);
     _bindFlag = translateBindFlag(type);
+
+    if (type == BufferType::STORAGE)
+    {
+        // D3D11 forbids D3D11_BIND_UNORDERED_ACCESS with D3D11_USAGE_DYNAMIC;
+        // use DEFAULT usage and update via UpdateSubresource.
+        _nativeUsage = D3D11_USAGE_DEFAULT;
+        _cpuAccess   = 0;
+    }
 
     _capacity = _bindFlag == D3D11_BIND_CONSTANT_BUFFER ? alignTo(size, 16) : size;
 
@@ -111,6 +120,11 @@ void BufferImpl::createNativeBuffer(const void* initial)
     desc.BindFlags      = _bindFlag;
     desc.CPUAccessFlags = _cpuAccess;
     desc.MiscFlags      = 0;
+    if (_type == BufferType::STORAGE && _stride != 0)
+    {
+        desc.MiscFlags           = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+        desc.StructureByteStride = _stride;
+    }
 
     D3D11_SUBRESOURCE_DATA initData{};
     initData.pSysMem = initial;
@@ -123,6 +137,63 @@ void BufferImpl::createNativeBuffer(const void* initial)
                static_cast<unsigned int>(hr));
         assert(false && "Failed to create ID3D11Buffer");
     }
+}
+
+/* -------------------------------------------------- createViews */
+void BufferImpl::createViews() const
+{
+    if (!_buffer)
+        return;
+
+    if (_bindFlag & D3D11_BIND_SHADER_RESOURCE)
+    {
+        if (_stride != 0)
+        {
+            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+            srvDesc.Format              = DXGI_FORMAT_UNKNOWN;
+            srvDesc.ViewDimension       = D3D11_SRV_DIMENSION_BUFFEREX;
+            srvDesc.BufferEx.FirstElement = 0;
+            srvDesc.BufferEx.NumElements  = static_cast<UINT>(_capacity / _stride);
+            srvDesc.BufferEx.Flags        = 0;
+            _device->CreateShaderResourceView(_buffer.Get(), &srvDesc, &_srv);
+        }
+        else
+        {
+            _device->CreateShaderResourceView(_buffer.Get(), nullptr, &_srv);
+        }
+    }
+
+    if (_bindFlag & D3D11_BIND_UNORDERED_ACCESS)
+    {
+        if (_stride != 0)
+        {
+            D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+            uavDesc.Format              = DXGI_FORMAT_UNKNOWN;
+            uavDesc.ViewDimension       = D3D11_UAV_DIMENSION_BUFFER;
+            uavDesc.Buffer.FirstElement = 0;
+            uavDesc.Buffer.NumElements  = static_cast<UINT>(_capacity / _stride);
+            uavDesc.Buffer.Flags        = 0;
+            _device->CreateUnorderedAccessView(_buffer.Get(), &uavDesc, &_uav);
+        }
+        else
+        {
+            _device->CreateUnorderedAccessView(_buffer.Get(), nullptr, &_uav);
+        }
+    }
+}
+
+ID3D11ShaderResourceView* BufferImpl::getSRV() const noexcept
+{
+    if (!_srv && _bindFlag & D3D11_BIND_SHADER_RESOURCE)
+        createViews();
+    return _srv.Get();
+}
+
+ID3D11UnorderedAccessView* BufferImpl::getUAV() const noexcept
+{
+    if (!_uav && _bindFlag & D3D11_BIND_UNORDERED_ACCESS)
+        createViews();
+    return _uav.Get();
 }
 
 /* -------------------------------------------------- updateData */

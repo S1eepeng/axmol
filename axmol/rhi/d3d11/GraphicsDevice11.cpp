@@ -309,6 +309,11 @@ Buffer* GraphicsDeviceImpl::createBuffer(size_t size, BufferType type, BufferUsa
     return new BufferImpl(_device, _context, size, type, usage, initial);
 }
 
+Buffer* GraphicsDeviceImpl::createBuffer(const BufferDesc& desc, const void* initial)
+{
+    return new BufferImpl(_device, _context, desc.size, desc.type, desc.usage, initial, desc.stride);
+}
+
 /**
  * New a Texture object.
  * @param descriptor Specifies texture description.
@@ -359,6 +364,11 @@ RenderPipeline* GraphicsDeviceImpl::createRenderPipeline()
 Program* GraphicsDeviceImpl::createProgram(Data vsData, Data fsData)
 {
     return new ProgramImpl(vsData, fsData);
+}
+
+Program* GraphicsDeviceImpl::createComputeProgram(Data csData)
+{
+    return new ProgramImpl(csData);
 }
 
 ShaderModule* GraphicsDeviceImpl::createShaderModule(ShaderStage stage, Data& chunk)

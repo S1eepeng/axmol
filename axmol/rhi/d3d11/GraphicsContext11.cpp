@@ -632,6 +632,106 @@ void GraphicsContextImpl::endRenderPass()
     }
 }
 
+bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
+{
+    if (!desc.programState)
+        return false;
+
+    auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
+    if (!program || !program->getCSModule())
+        return false;
+
+    auto context = _d3d11Context;
+    _programState = desc.programState;
+
+    program->applyCompute(context);
+
+    auto& callbackUniforms = desc.programState->getCallbackUniforms();
+    for (auto& cb : callbackUniforms)
+        cb.second(_programState, cb.first);
+
+    auto& cpuBuffer = desc.programState->getUniformBuffer();
+    program->bindUniformBuffers(context, cpuBuffer.data(), cpuBuffer.size());
+
+    // Phase 1: bind textures to CS stage at their reflected t# slots.
+    for (const auto& [bindingIndex, bindingSet] : desc.programState->getTextureBindingSets())
+    {
+        auto& texs = bindingSet.texs;
+        for (size_t k = 0; k < texs.size(); ++k)
+        {
+            auto textureImpl = static_cast<TextureImpl*>(texs[k]);
+            context->CSSetShaderResources(static_cast<UINT>(bindingIndex + k), 1, &textureImpl->internalHandle().srv);
+        }
+    }
+
+    // Phase 2: bind samplers to CS stage (honoring custom sampler overrides).
+    auto samplerRegistry = SamplerRegistry::getInstance();
+    for (const auto& samplerInfo : program->getActiveSamplerInfos())
+    {
+        if (!samplerInfo.samplerId || samplerInfo.count == 0)
+            continue;
+
+        auto samplerId = samplerInfo.samplerId;
+        if (samplerInfo.presetIndex < 0)
+        {
+            if (auto overrideId = _programState->getSamplerOverride(samplerInfo.binding))
+                samplerId = overrideId;
+        }
+
+        auto sampler = static_cast<ID3D11SamplerState*>(samplerRegistry->getSampler(samplerId));
+        if (!sampler)
+            continue;
+
+        for (uint16_t i = 0; i < samplerInfo.count; ++i)
+            context->CSSetSamplers(static_cast<UINT>(samplerInfo.binding + i), 1, &sampler);
+    }
+
+    // Phase 3: bind storage buffers — RW -> UAV (u#), RO -> SRV (t#).
+    std::vector<UINT> boundUAVs;
+    std::vector<UINT> boundSRVs;
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        if (bindingSet.access == BufferAccess::READ_WRITE)
+        {
+            auto uav = bufferImpl->getUAV();
+            if (!uav)
+                continue;
+            context->CSSetUnorderedAccessViews(static_cast<UINT>(binding), 1, &uav, nullptr);
+            boundUAVs.push_back(static_cast<UINT>(binding));
+        }
+        else
+        {
+            auto srv = bufferImpl->getSRV();
+            if (!srv)
+                continue;
+            context->CSSetShaderResources(static_cast<UINT>(binding), 1, &srv);
+            boundSRVs.push_back(static_cast<UINT>(binding));
+        }
+    }
+
+    context->Dispatch(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
+
+    // Unbind CS resources to avoid D3D11 SRV/UAV conflicts with later draws.
+    for (UINT slot : boundUAVs)
+        context->CSSetUnorderedAccessViews(slot, 1, nullptr, nullptr);
+    for (UINT slot : boundSRVs)
+        context->CSSetShaderResources(slot, 1, nullptr);
+    for (const auto& [bindingIndex, bindingSet] : desc.programState->getTextureBindingSets())
+    {
+        for (size_t k = 0; k < bindingSet.texs.size(); ++k)
+        {
+            const UINT slot = static_cast<UINT>(bindingIndex + k);
+            context->CSSetShaderResources(slot, 1, nullptr);
+        }
+    }
+
+    _programState = nullptr;
+    return true;
+}
+
 void GraphicsContextImpl::prepareDrawing()
 {
     assert(_programState);
@@ -879,8 +979,8 @@ bool GraphicsContextImpl::copyTexture(Texture* src, Texture* dst)
 
     D3D11_TEXTURE2D_DESC srcDesc{};
     D3D11_TEXTURE2D_DESC dstDesc{};
-    srcResource->GetDesc(&srcDesc);
-    dstResource->GetDesc(&dstDesc);
+    static_cast<ID3D11Texture2D*>(srcResource)->GetDesc(&srcDesc);
+    static_cast<ID3D11Texture2D*>(dstResource)->GetDesc(&dstDesc);
 
     if (srcDesc.Width != dstDesc.Width || srcDesc.Height != dstDesc.Height || srcDesc.Format != dstDesc.Format ||
         srcDesc.SampleDesc.Count != 1 || dstDesc.SampleDesc.Count != 1 || srcDesc.ArraySize != 1 ||
