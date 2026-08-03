@@ -59,7 +59,8 @@ ComputeDispatchTest::~ComputeDispatchTest()
     AX_SAFE_RELEASE(_renderState);
     AX_SAFE_RELEASE(_computeState);
     AX_SAFE_RELEASE(_computeProgram);
-    AX_SAFE_RELEASE(_renderProgram);
+
+    ProgramManager::getInstance()->unloadProgram(_renderProgram);
 }
 
 bool ComputeDispatchTest::init()
@@ -176,7 +177,7 @@ void ComputeDispatchTest::setupDrawCommand(ax::Renderer* renderer)
     _renderState->setUniformBlock(0, &cb, sizeof(cb));
 
     _drawCommand.init(0.0f);
-    _drawCommand.setOwnPSVL(_renderState, _vertexLayout, ax::RenderCommand::ADOPT_FLAG_PS);
+    _drawCommand.setOwnPSVL(_renderState, _vertexLayout);
     _drawCommand.setDrawType(ax::CustomCommand::DrawType::ELEMENT);
     _drawCommand.setPrimitiveType(ax::CustomCommand::PrimitiveType::TRIANGLE);
     _drawCommand.setTransparent(false);
