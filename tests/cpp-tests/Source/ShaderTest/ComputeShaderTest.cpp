@@ -1,0 +1,196 @@
+/****************************************************************************
+ Copyright (c) 2019-present Axmol Engine contributors (see AUTHORS.md).
+
+ https://axmol.dev/
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE.
+ ****************************************************************************/
+
+#include "ComputeShaderTest.h"
+#include "axmol/rhi/GraphicsCore.h"
+#include "axmol/rhi/VertexLayout.h"
+#include "axmol/renderer/Renderer.h"
+
+using namespace ax;
+
+namespace
+{
+constexpr int kColorCount = 16;
+
+ax::Data loadArchive(std::string_view name)
+{
+    auto fileUtils = FileUtils::getInstance();
+    auto fullPath  = fileUtils->fullPathForFilename(name);
+    if (fullPath.empty())
+        return {};
+    return fileUtils->getDataFromFile(fullPath);
+}
+}  // namespace
+
+ComputeShaderTests::ComputeShaderTests()
+{
+    ADD_TEST_CASE(ComputeDispatchTest);
+}
+
+ComputeDispatchTest::ComputeDispatchTest() {}
+
+ComputeDispatchTest::~ComputeDispatchTest()
+{
+    AX_SAFE_RELEASE(_indexBuffer);
+    AX_SAFE_RELEASE(_vertexBuffer);
+    AX_SAFE_RELEASE(_storageBuffer);
+    AX_SAFE_RELEASE(_vertexLayout);
+    AX_SAFE_RELEASE(_renderState);
+    AX_SAFE_RELEASE(_computeState);
+    AX_SAFE_RELEASE(_computeProgram);
+    AX_SAFE_RELEASE(_renderProgram);
+}
+
+bool ComputeDispatchTest::init()
+{
+    if (!TestCase::init())
+        return false;
+
+    auto device = rhi::GraphicsCore::device();
+    if (!device || !device->checkForFeatureSupported(rhi::FeatureType::COMPUTE_SHADER))
+        return true;  // unsupported backend; render nothing
+
+    // Compute program: writes a gradient into the storage buffer.
+    _computeProgram = device->createComputeProgram(loadArchive("custom/compute_dispatch_cs"));
+    if (!_computeProgram || !_computeProgram->isValid())
+        return true;
+    _computeState = new rhi::ProgramState(_computeProgram);
+    _computeState->setStorageBuffer(0, nullptr, rhi::BufferAccess::READ_WRITE);
+
+    // Render program: vertex shader reads the storage buffer to color a quad.
+    _renderProgram = ProgramManager::getInstance()->loadProgram("custom/compute_dispatch_vs",
+                                                                "custom/compute_dispatch_ps");
+    if (!_renderProgram)
+        return true;
+    _renderState = new rhi::ProgramState(_renderProgram);
+    _renderState->setStorageBuffer(0, nullptr, rhi::BufferAccess::READ_ONLY);
+
+    // Storage buffer: kColorCount float4.
+    rhi::BufferDesc storageDesc;
+    storageDesc.size   = static_cast<size_t>(kColorCount) * sizeof(float) * 4;
+    storageDesc.stride = sizeof(float) * 4;
+    storageDesc.type   = rhi::BufferType::STORAGE;
+    storageDesc.usage  = rhi::BufferUsage::DYNAMIC;
+    storageDesc.access = rhi::BufferAccess::READ_WRITE;
+    _storageBuffer     = device->createBuffer(storageDesc);
+    if (!_storageBuffer)
+        return true;
+
+    _computeState->setStorageBuffer(0, _storageBuffer, rhi::BufferAccess::READ_WRITE);
+    _renderState->setStorageBuffer(0, _storageBuffer, rhi::BufferAccess::READ_ONLY);
+
+    // Fullscreen quad: pos (float3) + id (float).
+    const float verts[] = {
+        -1.0f, -1.0f, 0.0f, 0.0f,
+         1.0f, -1.0f, 0.0f, 4.0f,
+         1.0f,  1.0f, 0.0f, 8.0f,
+        -1.0f,  1.0f, 0.0f, 12.0f,
+    };
+    _vertexBuffer = device->createBuffer(sizeof(verts), rhi::BufferType::VERTEX, rhi::BufferUsage::STATIC, verts);
+
+    const unsigned short indices[] = {0, 1, 2, 0, 2, 3};
+    _indexBuffer = device->createBuffer(sizeof(indices), rhi::BufferType::INDEX, rhi::BufferUsage::STATIC, indices);
+
+    rhi::VertexLayoutDesc layoutDesc;
+    layoutDesc.startLayout(2);
+    rhi::VertexInputDesc posDesc;
+    posDesc.semantic = rhi::VertexSemantic::POSITION;
+    posDesc.location = 0;
+    posDesc.varType  = axslc::SC_TYPE_FLOAT3;
+    rhi::VertexInputDesc idDesc;
+    idDesc.semantic = rhi::VertexSemantic::TEXCOORD0;
+    idDesc.location = 1;
+    idDesc.varType  = axslc::SC_TYPE_FLOAT;
+    layoutDesc.addAttrib(&posDesc, rhi::VertexElementType::FLOAT3, 0, false);
+    layoutDesc.addAttrib(&idDesc, rhi::VertexElementType::FLOAT, 12, false);
+    layoutDesc.endLayout(16);
+    _vertexLayout = device->createVertexLayout(std::move(layoutDesc));
+
+    return true;
+}
+
+std::string ComputeDispatchTest::title() const
+{
+    return "Compute Dispatch (storage buffer write -> vertex read)";
+}
+
+void ComputeDispatchTest::visit(const ax::SceneRenderState& state, const ax::Mat4& parentTransform, uint32_t parentFlags)
+{
+    auto renderer = state.getRenderer();
+    if (renderer && _computeState && _storageBuffer && _renderState && _vertexLayout)
+    {
+        dispatchCompute(renderer);
+        setupDrawCommand(renderer);
+    }
+    TestCase::visit(state, parentTransform, parentFlags);
+}
+
+void ComputeDispatchTest::dispatchCompute(ax::Renderer* renderer)
+{
+    auto context = renderer->getContext();
+    if (!context)
+        return;
+
+    rhi::ComputeDispatchDesc desc;
+    desc.programState = _computeState;
+    desc.groupCountX  = 1;  // 16 threads in one group
+    desc.groupCountY  = 1;
+    desc.groupCountZ  = 1;
+    desc.threadCountX = kColorCount;
+    desc.threadCountY = 1;
+    desc.threadCountZ = 1;
+
+    context->dispatch(desc);
+}
+
+void ComputeDispatchTest::setupDrawCommand(ax::Renderer* renderer)
+{
+    // VS constants: orthographic identity mvp + color count.
+    struct
+    {
+        float mvp[16];
+        int colorCount;
+    } cb{};
+    cb.mvp[0] = cb.mvp[5] = cb.mvp[10] = cb.mvp[15] = 1.0f;
+    cb.colorCount = kColorCount;
+    _renderState->setUniformBlock(0, &cb, sizeof(cb));
+
+    _drawCommand.init(0.0f);
+    _drawCommand.setOwnPSVL(_renderState, _vertexLayout, ax::RenderCommand::ADOPT_FLAG_PS);
+    _drawCommand.setDrawType(ax::CustomCommand::DrawType::ELEMENT);
+    _drawCommand.setPrimitiveType(ax::CustomCommand::PrimitiveType::TRIANGLE);
+    _drawCommand.setTransparent(false);
+    _drawCommand.createVertexBuffer(16, 4, ax::CustomCommand::BufferUsage::DYNAMIC);
+    const float verts[] = {
+        -1.0f, -1.0f, 0.0f, 0.0f,
+         1.0f, -1.0f, 0.0f, 4.0f,
+         1.0f,  1.0f, 0.0f, 8.0f,
+        -1.0f,  1.0f, 0.0f, 12.0f,
+    };
+    _drawCommand.updateVertexBuffer(verts, sizeof(verts));
+    _drawCommand.setIndexBuffer(_indexBuffer, ax::CustomCommand::IndexFormat::U_SHORT);
+    _drawCommand.setIndexDrawInfo(0, 6);
+
+    renderer->addCommand(&_drawCommand);
+}
