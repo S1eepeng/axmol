@@ -119,6 +119,8 @@ void ShaderModule::parseShaderCode(void)
         ref_stage = ShaderStage::VERTEX;
     else if (stage_id == SC_STAGE_FRAGMENT)
         ref_stage = ShaderStage::FRAGMENT;
+    else if (stage_id == SC_STAGE_COMPUTE)
+        ref_stage = ShaderStage::COMPUTE;
 
     assert(ref_stage == _stage && "Shader stage mismatch in axslc chunk");
 
