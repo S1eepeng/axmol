@@ -141,6 +141,8 @@ public:
 
     Program* createProgram(Data vsData, Data fsData) override;
 
+    Program* createComputeProgram(Data csData) override;
+
     /**
      * Get a MTLDevice object.
      * @return A MTLDevice object.

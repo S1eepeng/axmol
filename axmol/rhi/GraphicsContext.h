@@ -56,6 +56,10 @@ struct ComputeDispatchDesc
     uint32_t groupCountX       = 1;
     uint32_t groupCountY       = 1;
     uint32_t groupCountZ       = 1;
+    // Local workgroup (threadgroup) size. Only required by Metal dispatchThreadgroups.
+    uint32_t threadCountX = 1;
+    uint32_t threadCountY = 1;
+    uint32_t threadCountZ = 1;
 };
 
 /**

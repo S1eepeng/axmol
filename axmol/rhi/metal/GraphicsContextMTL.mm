@@ -32,6 +32,7 @@
 #include "axmol/rhi/metal/BufferManager.h"
 #include "axmol/rhi/metal/DepthStencilStateMTL.h"
 #include "axmol/rhi/metal/RenderTargetMTL.h"
+#include "axmol/rhi/metal/ProgramMTL.h"
 #include "axmol/rhi/SamplerRegistry.h"
 #include "axmol/platform/Application.h"
 
@@ -195,6 +196,10 @@ GraphicsContextImpl::~GraphicsContextImpl()
 
     AX_SAFE_RELEASE_NULL(_screenRT);
     AX_SAFE_RELEASE_NULL(_renderPipeline);
+
+    for (auto& [_, computePipeline] : _computePipelines)
+        [computePipeline release];
+    _computePipelines.clear();
 
     [oneOffBuffer release];
 
@@ -381,6 +386,117 @@ void GraphicsContextImpl::drawElementsInstanced(IndexFormat indexType,
 void GraphicsContextImpl::endRenderPass()
 {
     afterDraw();
+}
+
+bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
+{
+    if (!desc.programState)
+        return false;
+
+    auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
+    if (!program || !program->getCSModule())
+        return false;
+
+    auto function = program->getMTLComputeFunction();
+    if (function == nil)
+        return false;
+
+    // Compute runs outside render passes: end any active render encoder so the
+    // compute encoder is recorded on the same command buffer. The caller must
+    // re-issue beginRenderPass for subsequent draws.
+    if (_mtlRenderEncoder)
+    {
+        [_mtlRenderEncoder endEncoding];
+        [_mtlRenderEncoder release];
+        _mtlRenderEncoder = nil;
+    }
+
+    id<MTLComputePipelineState> computePipeline = _computePipelines[program->getProgramId()];
+    if (computePipeline == nil)
+    {
+        NSError* error = nil;
+        computePipeline =
+            [[_mtlCmdQueue.device newComputePipelineStateWithFunction:function error:&error] retain];
+        if (computePipeline == nil)
+        {
+            NSLog(@"Failed to create Metal compute pipeline: %@", error);
+            return false;
+        }
+        _computePipelines[program->getProgramId()] = computePipeline;
+    }
+
+    id<MTLComputeCommandEncoder> computeEncoder = [_currentCmdBuffer computeCommandEncoder];
+    [computeEncoder setComputePipelineState:computePipeline];
+
+    _programState = desc.programState;
+
+    auto& callbackUniforms = desc.programState->getCallbackUniforms();
+    for (auto& cb : callbackUniforms)
+        cb.second(_programState, cb.first);
+
+    auto& cpuBuffer = desc.programState->getUniformBuffer();
+    if (!cpuBuffer.empty())
+    {
+        for (auto& uboInfo : desc.programState->getActiveUniformBlockInfos())
+        {
+            [computeEncoder setBytes:cpuBuffer.data() + uboInfo.cpuOffset
+                              length:uboInfo.sizeBytes
+                             atIndex:uboInfo.binding];
+        }
+    }
+
+    // Textures (separate MTL namespace, index = unified slot).
+    for (const auto& [bindingIndex, bindingSet] : desc.programState->getTextureBindingSets())
+    {
+        for (size_t k = 0; k < bindingSet.texs.size(); ++k)
+        {
+            auto textureImpl = static_cast<TextureImpl*>(bindingSet.texs[k]);
+            [computeEncoder setTexture:textureImpl->internalHandle() atIndex:bindingIndex + k];
+        }
+    }
+
+    // Samplers (separate MTL namespace).
+    auto samplerRegistry = SamplerRegistry::getInstance();
+    for (const auto& samplerInfo : program->getActiveSamplerInfos())
+    {
+        if (!samplerInfo.samplerId || samplerInfo.count == 0)
+            continue;
+
+        auto samplerId = samplerInfo.samplerId;
+        if (samplerInfo.presetIndex < 0)
+        {
+            if (auto overrideId = _programState->getSamplerOverride(samplerInfo.binding))
+                samplerId = overrideId;
+        }
+
+        auto sampler      = samplerRegistry->getSampler(samplerId);
+        auto samplerState = static_cast<id<MTLSamplerState>>(sampler);
+        if (samplerState == nil)
+            continue;
+
+        for (uint16_t i = 0; i < samplerInfo.count; ++i)
+            [computeEncoder setSamplerState:samplerState atIndex:samplerInfo.binding + i];
+    }
+
+    // Storage buffers ([[buffer(slot)]]).
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        id<MTLBuffer> mtlBuffer = bufferImpl->getMTLBuffer();
+        if (mtlBuffer == nil)
+            continue;
+        [computeEncoder setBuffer:mtlBuffer offset:0 atIndex:binding];
+    }
+
+    MTLSize threadgroupsPerGrid = MTLSizeMake(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
+    MTLSize threadsPerThreadgroup = MTLSizeMake(desc.threadCountX, desc.threadCountY, desc.threadCountZ);
+    [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
+    [computeEncoder endEncoding];
+
+    _programState = nullptr;
+    return true;
 }
 
 void GraphicsContextImpl::readPixels(RenderTarget* rt, std::function<void(const PixelBufferDesc&)> callback)
@@ -591,15 +707,30 @@ void GraphicsContextImpl::setUniformBuffer() const
             case ShaderStage::VERTEX:
                 [_mtlRenderEncoder setVertexBytes:bufferPtr + uboInfo.cpuOffset
                                            length:uboInfo.sizeBytes
-                                          atIndex:VS_UBO_BINDING_INDEX];
+                                          atIndex:uboInfo.binding];
                 break;
             case ShaderStage::FRAGMENT:
                 [_mtlRenderEncoder setFragmentBytes:bufferPtr + uboInfo.cpuOffset
                                              length:uboInfo.sizeBytes
-                                            atIndex:FS_UBO_BINDING_INDEX];
+                                            atIndex:uboInfo.binding];
                 break;
             default:;
             }
+        }
+
+        // Bind storage buffers to the graphics stages (GPU render VS/PS). Binding
+        // to an unused stage is harmless in Metal.
+        for (const auto& [binding, bindingSet] : _programState->getStorageBufferBindingSets())
+        {
+            if (!bindingSet.buffer)
+                continue;
+            auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+            id<MTLBuffer> mtlBuffer = bufferImpl->getMTLBuffer();
+            if (mtlBuffer == nil)
+                continue;
+
+            [_mtlRenderEncoder setVertexBuffer:mtlBuffer offset:0 atIndex:binding];
+            [_mtlRenderEncoder setFragmentBuffer:mtlBuffer offset:0 atIndex:binding];
         }
     }
 }

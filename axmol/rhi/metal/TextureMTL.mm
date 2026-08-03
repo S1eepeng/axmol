@@ -157,6 +157,43 @@ void TextureImpl::updateCompressedData(const void* data,
     updateCompressedSubData(0, 0, width, height, dataSize, level, data, layerIndex);
 }
 
+void TextureImpl::updateData3D(const void* data, int width, int height, int depth, int level)
+{
+    updateSubData3D(0, 0, 0, width, height, depth, level, data);
+}
+
+void TextureImpl::updateSubData3D(int xoffset,
+                                  int yoffset,
+                                  int zoffset,
+                                  int width,
+                                  int height,
+                                  int depth,
+                                  int level,
+                                  const void* data)
+{
+    ensureNativeTexture();
+
+    if (!data) [[unlikely]]
+        return;
+
+    MTLRegion region = {
+        {(NSUInteger)xoffset, (NSUInteger)yoffset, (NSUInteger)zoffset},  // MTLOrigin
+        {(NSUInteger)width, (NSUInteger)height, (NSUInteger)depth}        // MTLSize
+    };
+
+    auto bytesPerRow  = RHIUtils::computeRowPitch(_desc.pixelFormat, static_cast<uint32_t>(width));
+    auto bytesPerImage = bytesPerRow * static_cast<uint32_t>(height);
+    [_mtlTexture replaceRegion:region
+                   mipmapLevel:level
+                         slice:0
+                     withBytes:data
+                   bytesPerRow:bytesPerRow
+                 bytesPerImage:bytesPerImage];
+
+    if (shouldGenMipmaps(level))
+        generateMipmaps();
+}
+
 void TextureImpl::updateCompressedSubData(int xoffset,
                                           int yoffset,
                                           int width,
@@ -226,6 +263,14 @@ void TextureImpl::ensureNativeTexture()
         textureDesc = [MTLTextureDescriptor textureCubeDescriptorWithPixelFormat:pixelFormat
                                                                             size:_desc.width
                                                                        mipmapped:needMipmaps];
+        break;
+    case TextureType::TEXTURE_3D:
+        textureDesc = [MTLTextureDescriptor texture3DDescriptorWithPixelFormat:pixelFormat
+                                                                         width:_desc.width
+                                                                        height:_desc.height
+                                                                         depth:_desc.depth
+                                                                      mipmapped:needMipmaps
+                                                                        levels:_desc.mipLevels ? _desc.mipLevels : 1];
         break;
     default:
         return;

@@ -492,6 +492,11 @@ Program* GraphicsDeviceImpl::createProgram(Data vsData, Data fsData)
     return new ProgramImpl(vsData, fsData);
 }
 
+Program* GraphicsDeviceImpl::createComputeProgram(Data csData)
+{
+    return new ProgramImpl(csData);
+}
+
 ShaderModule* GraphicsDeviceImpl::createShaderModule(ShaderStage stage, Data& chunk)
 {
     return new ShaderModuleImpl(_mtlDevice, stage, chunk);
