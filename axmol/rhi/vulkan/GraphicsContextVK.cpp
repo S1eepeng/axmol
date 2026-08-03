@@ -31,6 +31,7 @@
 #include "axmol/rhi/vulkan/TextureVK.h"
 #include "axmol/rhi/vulkan/UtilsVK.h"
 #include "axmol/rhi/vulkan/GraphicsDeviceVK.h"
+#include "axmol/rhi/vulkan/ComputePipelineVK.h"
 #include "axmol/rhi/vulkan/SemaphorePoolVK.h"
 #include "axmol/rhi/GraphicsCore.h"
 #include "axmol/rhi/SamplerRegistry.h"
@@ -172,6 +173,18 @@ GraphicsContextImpl::~GraphicsContextImpl()
         _renderPipeline->recycleDescriptorStates(descriptorStates, false);
         descriptorStates.clear();
     }
+    for (auto& computeDescriptorStates : _inFlightComputeDescriptorStates)
+    {
+        for (auto descriptorState : computeDescriptorStates)
+        {
+            if (descriptorState->pool)
+                descriptorState->pool->getAllocator()->freeDescriptorSets(descriptorState);
+        }
+        computeDescriptorStates.clear();
+    }
+    for (auto& [_, computePipeline] : _computePipelines)
+        delete computePipeline;
+    _computePipelines.clear();
 
     AX_SAFE_RELEASE_NULL(_screenRT);
     _driver->destroyStaleResources();
@@ -582,6 +595,17 @@ bool GraphicsContextImpl::beginFrame()
     auto& descriptorStates = _inFlightDescriptorStates[_frameIndex];
     _renderPipeline->recycleDescriptorStates(descriptorStates, true);
     descriptorStates.clear();
+
+    auto& computeDescriptorStates = _inFlightComputeDescriptorStates[_frameIndex];
+    for (auto descriptorState : computeDescriptorStates)
+    {
+        auto it = _computePipelines.find(descriptorState->progId);
+        if (it != _computePipelines.end())
+            it->second->recycleDescriptorState(descriptorState);
+        else if (descriptorState->pool)
+            descriptorState->pool->getAllocator()->freeDescriptorSets(descriptorState);
+    }
+    computeDescriptorStates.clear();
 
     VkCommandBufferBeginInfo const binfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1042,6 +1066,13 @@ void GraphicsContextImpl::removeCachedPipelineObjects(Program* key)
 {
     if (_renderPipeline)
         _renderPipeline->removeCachedObjects(key);
+
+    auto it = _computePipelines.find(key->getProgramId());
+    if (it != _computePipelines.end())
+    {
+        delete it->second;
+        _computePipelines.erase(it);
+    }
 }
 
 void GraphicsContextImpl::prepareDrawing()
@@ -1228,6 +1259,196 @@ void GraphicsContextImpl::drawArrays(size_t start, size_t count, bool /*wirefram
 {
     prepareDrawing();
     vkCmdDraw(_currentCmdBuffer, static_cast<uint32_t>(count), 1, static_cast<uint32_t>(start), 0);
+}
+
+bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
+{
+    if (!desc.programState)
+        return false;
+
+    auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
+    if (!program || !program->getCSModule())
+        return false;
+
+    _programState = desc.programState;
+
+    // Create / fetch the compute pipeline for this program.
+    auto& computePipeline = _computePipelines[program->getProgramId()];
+    if (!computePipeline)
+        computePipeline = new ComputePipelineImpl(_driver, program);
+    if (computePipeline->getPipeline() == VK_NULL_HANDLE)
+        return false;
+
+    auto descriptorState = computePipeline->acquireDescriptorState();
+    _inFlightComputeDescriptorStates[_frameIndex].emplace_back(descriptorState);
+    auto& descriptorSets = descriptorState->sets;
+
+    _descriptorWritesPerFrame.clear();
+    _descriptorWritesPerFrame.reserve(16);
+    _descriptorBufferInfos.clear();
+    _descriptorBufferInfos.reserve(8);
+    auto& writes = _descriptorWritesPerFrame;
+
+    // UBOs from the uniform ring buffer.
+    auto& cpuBuffer = desc.programState->getUniformBuffer();
+    if (!cpuBuffer.empty())
+    {
+        auto bufferPtr = cpuBuffer.data();
+        for (auto& uboInfo : desc.programState->getActiveUniformBlockInfos())
+        {
+            UniformSlice s = allocateUniformSlice(uboInfo.sizeBytes);
+            ::memcpy(s.cpuPtr, bufferPtr + uboInfo.cpuOffset, uboInfo.sizeBytes);
+
+            VkWriteDescriptorSet& write        = writes.emplace_back();
+            VkDescriptorBufferInfo& bufferInfo = _descriptorBufferInfos.emplace_back();
+            bufferInfo.buffer = _uniformRings[_frameIndex].buffer;
+            bufferInfo.offset = static_cast<VkDeviceSize>(s.offset);
+            bufferInfo.range  = static_cast<VkDeviceSize>(uboInfo.sizeBytes);
+
+            write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.dstSet          = descriptorSets[SET_INDEX_UBO];
+            write.dstBinding      = uboInfo.binding;
+            write.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            write.descriptorCount = 1;
+            write.pBufferInfo     = &bufferInfo;
+        }
+    }
+
+    // Storage buffers -> set 1, STORAGE_BUFFER.
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        bufferImpl->setLastFenceValue(_frameFenceValue);
+
+        VkWriteDescriptorSet& write        = writes.emplace_back();
+        VkDescriptorBufferInfo& bufferInfo = _descriptorBufferInfos.emplace_back();
+        bufferInfo.buffer = bufferImpl->internalHandle();
+        bufferInfo.offset = 0;
+        bufferInfo.range  = VK_WHOLE_SIZE;
+
+        write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet          = descriptorSets[SET_INDEX_RESOURCE];
+        write.dstBinding      = static_cast<uint32_t>(binding);
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.descriptorCount = 1;
+        write.pBufferInfo     = &bufferInfo;
+    }
+
+    // Textures -> set 1, SAMPLED_IMAGE / COMBINED_IMAGE_SAMPLER.
+    const auto& activeSamplerInfos = program->getActiveSamplerInfos();
+    const bool separateSamplers    = !activeSamplerInfos.empty();
+    auto& imageInfos               = _descriptorImageInfosPerFrame;
+    imageInfos.clear();
+    imageInfos.reserve(8);
+
+    for (const auto& [bindingIndex, bindingSet] : desc.programState->getTextureBindingSets())
+    {
+        const auto& texs = bindingSet.texs;
+        if (texs.empty())
+            continue;
+
+        const size_t offset = imageInfos.size();
+        for (auto tex : texs)
+        {
+            auto textureImpl      = static_cast<TextureImpl*>(tex);
+            auto& imageInfo       = imageInfos.emplace_back();
+            imageInfo.sampler     = separateSamplers ? VK_NULL_HANDLE : textureImpl->getSampler();
+            imageInfo.imageView   = textureImpl->internalHandle().view;
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            textureImpl->setLastFenceValue(_frameFenceValue);
+        }
+
+        VkWriteDescriptorSet& write = writes.emplace_back();
+        write.sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet                = descriptorSets[SET_INDEX_RESOURCE];
+        write.dstBinding            = bindingIndex;
+        write.descriptorType =
+            separateSamplers ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.descriptorCount = static_cast<uint32_t>(texs.size());
+        write.pImageInfo      = imageInfos.data() + offset;
+    }
+
+    // Samplers.
+    if (separateSamplers)
+    {
+        for (const auto& samplerInfo : activeSamplerInfos)
+        {
+            if (!samplerInfo.samplerId)
+                continue;
+
+            auto samplerId = samplerInfo.samplerId;
+            if (samplerInfo.presetIndex < 0)
+            {
+                if (auto overrideId = _programState->getSamplerOverride(samplerInfo.binding))
+                    samplerId = overrideId;
+            }
+
+            auto samplerHandle = SamplerRegistry::getInstance()->getSampler(samplerId);
+            if (!samplerHandle)
+                continue;
+            auto sampler = static_cast<VkSampler>(samplerHandle);
+
+            const size_t offset = imageInfos.size();
+            for (uint16_t i = 0; i < samplerInfo.count; ++i)
+            {
+                auto& imageInfo   = imageInfos.emplace_back();
+                imageInfo.sampler = sampler;
+            }
+
+            auto dstSet = samplerInfo.presetIndex >= 0 ? descriptorSets[SET_INDEX_RESOURCE]
+                                                       : descriptorSets[SET_INDEX_CUSTOM_SAMPLER];
+            if (!dstSet)
+                continue;
+
+            VkWriteDescriptorSet& write = writes.emplace_back();
+            write.sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.dstSet                = dstSet;
+            write.dstBinding            = samplerInfo.binding;
+            write.descriptorType        = VK_DESCRIPTOR_TYPE_SAMPLER;
+            write.descriptorCount       = static_cast<uint32_t>(samplerInfo.count);
+            write.pImageInfo            = imageInfos.data() + offset;
+        }
+    }
+
+    if (!writes.empty())
+        vkUpdateDescriptorSets(_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+    vkCmdBindPipeline(_currentCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline->getPipeline());
+    auto layoutState = computePipeline->getLayoutState();
+    vkCmdBindDescriptorSets(_currentCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, layoutState->layout, 0,
+                            layoutState->descriptorSetLayoutCount, descriptorSets.data(), 0, nullptr);
+
+    vkCmdDispatch(_currentCmdBuffer, desc.groupCountX, desc.groupCountY, desc.groupCountZ);
+
+    // Make compute writes visible to subsequent compute/vertex/fragment reads.
+    tlx::pod_vector<VkBufferMemoryBarrier> barriers;
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_WRITE)
+            continue;
+        auto bufferImpl  = static_cast<BufferImpl*>(bindingSet.buffer);
+        VkBufferMemoryBarrier& barrier = barriers.emplace_back();
+        barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer              = bufferImpl->internalHandle();
+        barrier.offset              = 0;
+        barrier.size                = VK_WHOLE_SIZE;
+    }
+    if (!barriers.empty())
+    {
+        vkCmdPipelineBarrier(_currentCmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             0, 0, nullptr, static_cast<uint32_t>(barriers.size()), barriers.data(), 0, nullptr);
+    }
+
+    _programState = nullptr;
+    return true;
 }
 
 void GraphicsContextImpl::drawArraysInstanced(size_t start, size_t count, int instanceCount, bool /*wireframe*/)

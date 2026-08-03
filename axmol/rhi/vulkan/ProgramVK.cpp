@@ -31,6 +31,8 @@ namespace ax::rhi::vk
 
 ProgramImpl::ProgramImpl(Data& vsData, Data& fsData) : Program(vsData, fsData) {}
 
+ProgramImpl::ProgramImpl(Data& csData) : Program(csData) {}
+
 ProgramImpl::~ProgramImpl()
 {
     static_cast<GraphicsDeviceImpl*>(axdrv)->removeCachedPipelineObjects(this);

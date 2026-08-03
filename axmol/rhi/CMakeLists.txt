@@ -182,6 +182,7 @@ if(AX_ENABLE_VK)
     rhi/vulkan/ProgramVK.h
     rhi/vulkan/VertexLayoutVK.h
     rhi/vulkan/SemaphorePoolVK.h
+    rhi/vulkan/ComputePipelineVK.h
   )
 
   list(APPEND _AX_RHI_SRC
@@ -197,6 +198,7 @@ if(AX_ENABLE_VK)
     rhi/vulkan/ProgramVK.cpp
     rhi/vulkan/VertexLayoutVK.cpp
     rhi/vulkan/SemaphorePoolVK.cpp
+    rhi/vulkan/ComputePipelineVK.cpp
   )
 endif()
 

@@ -119,6 +119,7 @@ public:
     DepthStencilState* createDepthStencilState() override;
     RenderPipeline* createRenderPipeline() override;
     Program* createProgram(Data vsData, Data fsData) override;
+    Program* createComputeProgram(Data csData) override;
     VertexLayout* createVertexLayout(VertexLayoutDesc&& desc) override;
 
     std::string getVendor() const override;
