@@ -255,6 +255,13 @@ GraphicsContextImpl::~GraphicsContextImpl()
 {
     _driver->waitForGPU();
 
+    if (!_frameCompletionOps.empty())
+    {
+        for (auto&& op : _frameCompletionOps)
+            op(_completedFenceValue);
+        _frameCompletionOps.clear();
+    }
+
     AX_SAFE_RELEASE_NULL(_screenRT);
     AX_SAFE_RELEASE_NULL(_renderPipeline);
 
@@ -1102,7 +1109,14 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     if (!desc.programState || !desc.pipeline)
         return false;
 
-    auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
+    auto* pipelineProgram = desc.pipeline->getProgram();
+    if (!pipelineProgram || pipelineProgram != desc.programState->getProgram())
+    {
+        AXASSERT(false, "ComputePipeline and ProgramState program mismatch");
+        return false;
+    }
+
+    auto program = static_cast<ProgramImpl*>(pipelineProgram);
     if (!program || !program->getCSModule())
         return false;
 
@@ -1258,6 +1272,11 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         cmd->ResourceBarrier(static_cast<UINT>(postBarriers.size()), postBarriers.data());
 
     _srvOffset[_frameIndex] = bindingStart + srvCount + uavCount;
+
+    // The D3D12 command list does not retain the PSO; keep the pipeline alive
+    // until the GPU has finished executing this frame.
+    computePipeline->retain();
+    _frameCompletionOps.emplace_back([computePipeline](uint64_t) { computePipeline->release(); });
 
     _programState = nullptr;
     return true;

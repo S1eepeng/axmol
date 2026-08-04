@@ -775,7 +775,16 @@ RenderPipeline* GraphicsDeviceImpl::createRenderPipeline()
 
 ComputePipeline* GraphicsDeviceImpl::createComputePipeline(Program* program)
 {
-    return new ComputePipelineImpl(this, static_cast<ProgramImpl*>(program));
+    if (!program || !program->isValid() || !program->getCSModule())
+        return nullptr;
+
+    auto* pipeline = new ComputePipelineImpl(this, static_cast<ProgramImpl*>(program));
+    if (!pipeline->isValid())
+    {
+        pipeline->release();
+        return nullptr;
+    }
+    return pipeline;
 }
 
 Program* GraphicsDeviceImpl::createProgram(Data vsData, Data fsData)

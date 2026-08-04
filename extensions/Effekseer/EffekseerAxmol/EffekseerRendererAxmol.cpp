@@ -320,8 +320,9 @@ class PipelineStateAX : public Effekseer::Backend::PipelineState
 {
 public:
     Effekseer::Backend::PipelineStateParameter param;
-    ax::rhi::ProgramState* programState = nullptr;      // owned
-    ax::rhi::ComputePipeline* computePipeline = nullptr; // owned, lazily created for compute dispatch
+    ax::rhi::ProgramState* programState = nullptr;       // owned
+    ax::rhi::ComputePipeline* computePipeline = nullptr;  // owned, lazily created for compute dispatch
+    bool computePipelineFailed = false;
 
     ~PipelineStateAX() override
     {
@@ -524,9 +525,18 @@ public:
 
         bindResources(ps, command.ResourceBinders, Effekseer::Backend::DispatchParameter::ResourceSlotCount);
 
+        if (!pipeline->computePipeline && !pipeline->computePipelineFailed)
+        {
+            pipeline->computePipeline = ax::rhi::GraphicsCore::device()->createComputePipeline(ps->getProgram());
+            if (!pipeline->computePipeline)
+            {
+                pipeline->computePipelineFailed = true;
+                AXLOGE("Failed to create compute pipeline for Effekseer dispatch");
+                return;
+            }
+        }
         if (!pipeline->computePipeline)
-            pipeline->computePipeline =
-                ax::rhi::GraphicsCore::device()->createComputePipeline(ps->getProgram());
+            return;
 
         ax::rhi::ComputeDispatchDesc desc;
         desc.pipeline     = pipeline->computePipeline;

@@ -390,7 +390,14 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     if (!desc.programState || !desc.pipeline)
         return false;
 
-    auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
+    auto* pipelineProgram = desc.pipeline->getProgram();
+    if (!pipelineProgram || pipelineProgram != desc.programState->getProgram())
+    {
+        AXLOGE("ComputePipeline and ProgramState program mismatch");
+        return false;
+    }
+
+    auto program = static_cast<ProgramImpl*>(pipelineProgram);
     if (!program || !program->getCSModule())
         return false;
 

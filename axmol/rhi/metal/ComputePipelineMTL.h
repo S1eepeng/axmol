@@ -39,6 +39,8 @@ public:
     ComputePipelineImpl(id<MTLDevice> mtlDevice, ProgramImpl* program);
     ~ComputePipelineImpl();
 
+    bool isValid() const override { return _mtlComputePipelineState != nil; }
+
     id<MTLComputePipelineState> getMTLComputePipelineState() const { return _mtlComputePipelineState; }
 
 private:

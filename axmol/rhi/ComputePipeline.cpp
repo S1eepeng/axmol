@@ -26,6 +26,12 @@
 
 namespace ax::rhi
 {
+
+ComputePipeline::~ComputePipeline()
+{
+    AX_SAFE_RELEASE(_program);
+}
+
 void ComputePipeline::setProgram(Program* program)
 {
     Object::assign(_program, program);

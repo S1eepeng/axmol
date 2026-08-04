@@ -37,6 +37,8 @@ class ComputePipelineImpl : public ComputePipeline
 public:
     explicit ComputePipelineImpl(ProgramImpl* program) { setProgram(program); }
     ~ComputePipelineImpl() override = default;
+
+    bool isValid() const override { return getProgram() != nullptr; }
 };
 
 }  // namespace ax::rhi::gl

@@ -52,10 +52,16 @@ public:
      */
     Program* getProgram() const { return _program; }
 
+    /**
+     * Check whether the backend pipeline has been successfully created.
+     * @return true if the native compute pipeline is ready to dispatch.
+     */
+    virtual bool isValid() const = 0;
+
 protected:
     void setProgram(Program* program);
 
-    virtual ~ComputePipeline() = default;
+    virtual ~ComputePipeline();
 
 private:
     Program* _program = nullptr;

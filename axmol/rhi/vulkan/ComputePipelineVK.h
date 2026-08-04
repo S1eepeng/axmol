@@ -46,6 +46,8 @@ public:
     ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl* program);
     ~ComputePipelineImpl();
 
+    bool isValid() const override { return _pipeline != VK_NULL_HANDLE; }
+
     VkPipeline getPipeline() const { return _pipeline; }
     PipelineLayoutState* getLayoutState() { return &_layoutState; }
 

@@ -403,6 +403,8 @@ RenderPipeline* GraphicsDeviceImpl::createRenderPipeline()
 
 ComputePipeline* GraphicsDeviceImpl::createComputePipeline(Program* program)
 {
+    if (!program || !program->isValid() || !program->getCSModule())
+        return nullptr;
     return new ComputePipelineImpl(static_cast<ProgramImpl*>(program));
 }
 

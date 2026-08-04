@@ -175,9 +175,10 @@ GraphicsContextImpl::~GraphicsContextImpl()
     }
     for (auto& computeDescriptorStates : _inFlightComputeDescriptorStates)
     {
-        for (auto descriptorState : computeDescriptorStates)
+        for (auto& entry : computeDescriptorStates)
         {
-            if (descriptorState->pool)
+            auto descriptorState = entry.descriptorState;
+            if (descriptorState && descriptorState->pool)
                 descriptorState->pool->getAllocator()->freeDescriptorSets(descriptorState);
         }
         computeDescriptorStates.clear();
@@ -594,10 +595,11 @@ bool GraphicsContextImpl::beginFrame()
     descriptorStates.clear();
 
     auto& computeDescriptorStates = _inFlightComputeDescriptorStates[_frameIndex];
-    for (auto descriptorState : computeDescriptorStates)
+    for (auto& entry : computeDescriptorStates)
     {
+        auto descriptorState = entry.descriptorState;
         if (descriptorState->computePipeline)
-            descriptorState->computePipeline->recycleDescriptorState(descriptorState);
+            entry.pipeline->recycleDescriptorState(descriptorState);
         else if (descriptorState->pool)
             descriptorState->pool->getAllocator()->freeDescriptorSets(descriptorState);
     }
@@ -1277,7 +1279,14 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     if (!desc.programState || !desc.pipeline)
         return false;
 
-    auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
+    auto* pipelineProgram = desc.pipeline->getProgram();
+    if (!pipelineProgram || pipelineProgram != desc.programState->getProgram())
+    {
+        AXASSERT(false, "ComputePipeline and ProgramState program mismatch");
+        return false;
+    }
+
+    auto program = static_cast<ProgramImpl*>(pipelineProgram);
     if (!program || !program->getCSModule())
         return false;
 
@@ -1288,7 +1297,8 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         return false;
 
     auto descriptorState = computePipeline->acquireDescriptorState();
-    _inFlightComputeDescriptorStates[_frameIndex].emplace_back(descriptorState);
+    _inFlightComputeDescriptorStates[_frameIndex].emplace_back(
+        InFlightComputeDescriptorState{RefPtr<ComputePipelineImpl>(computePipeline), descriptorState});
     auto& descriptorSets = descriptorState->sets;
 
     _descriptorWritesPerFrame.clear();

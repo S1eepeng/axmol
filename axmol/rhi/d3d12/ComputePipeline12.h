@@ -47,6 +47,8 @@ public:
     ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl* program);
     ~ComputePipelineImpl();
 
+    bool isValid() const override { return _pso.Get() != nullptr && _rootSig.Get() != nullptr; }
+
     ID3D12PipelineState* getPipeline() const { return _pso.Get(); }
     ID3D12RootSignature* getRootSignature() const { return _rootSig.Get(); }
 
