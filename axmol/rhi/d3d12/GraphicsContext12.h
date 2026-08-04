@@ -24,12 +24,14 @@
 #pragma once
 #include "axmol/rhi/GraphicsContext.h"
 #include "axmol/rhi/d3d12/RenderPipeline12.h"
+#include "axmol/rhi/d3d12/ComputePipeline12.h"
 #include "axmol/rhi/d3d12/DepthStencilState12.h"
 #include "axmol/rhi/d3d12/VertexLayout12.h"
 #include "axmol/rhi/d3d12/Program12.h"
 #include "axmol/rhi/d3d12/Buffer12.h"
 #include "axmol/rhi/d3d12/Texture12.h"
 #include "axmol/tlx/flat_set.hpp"
+#include "axmol/base/RefPtr.h"
 
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -237,6 +239,10 @@ private:
     BufferImpl* _instanceBuffer{nullptr};
 
     std::vector<std::function<void(uint64_t)>> _frameCompletionOps;
+
+    // Compute pipelines retained until their frame fence completes (the
+    // command list does not retain the PSO; the caller may release it early).
+    std::array<std::vector<RefPtr<ComputePipelineImpl>>, MAX_FRAMES_IN_FLIGHT> _inFlightComputePipelines;
 
     D3D12_VIEWPORT _cachedViewport{.MinDepth = 0.0f, .MaxDepth = 1.0f};
     D3D12_RECT _cachedScissor{};

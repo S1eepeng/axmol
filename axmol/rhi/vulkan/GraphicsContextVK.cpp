@@ -598,7 +598,9 @@ bool GraphicsContextImpl::beginFrame()
     for (auto& entry : computeDescriptorStates)
     {
         auto descriptorState = entry.descriptorState;
-        if (descriptorState->computePipeline)
+        if (!descriptorState)
+            continue;
+        if (entry.pipeline)
             entry.pipeline->recycleDescriptorState(descriptorState);
         else if (descriptorState->pool)
             descriptorState->pool->getAllocator()->freeDescriptorSets(descriptorState);
@@ -1434,6 +1436,9 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         vkUpdateDescriptorSets(_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     vkCmdBindPipeline(_currentCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline->getPipeline());
+    // Compute uses the same command buffer: invalidate the graphics pipeline
+    // cache so a later draw re-binds its graphics pipeline.
+    _boundPipeline = VK_NULL_HANDLE;
     auto layoutState = computePipeline->getLayoutState();
     vkCmdBindDescriptorSets(_currentCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, layoutState->layout, 0,
                             layoutState->descriptorSetLayoutCount, descriptorSets.data(), 0, nullptr);

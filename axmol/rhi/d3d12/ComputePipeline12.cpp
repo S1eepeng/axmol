@@ -136,16 +136,18 @@ void ComputePipelineImpl::createRootSignature(ProgramImpl* program)
             customParam.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
             _customSamplerRootIndex                         = rootIndex++;
         }
+    }
 
-        if (!srvRanges.empty())
-        {
-            D3D12_ROOT_PARAMETER& srvParam               = rootParams.emplace_back();
-            srvParam.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-            srvParam.DescriptorTable.NumDescriptorRanges = static_cast<UINT>(srvRanges.size());
-            srvParam.DescriptorTable.pDescriptorRanges   = srvRanges.data();
-            srvParam.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
-            _srvRootIndex                                = rootIndex++;
-        }
+    // The SRV table must be created even when the compute shader only uses
+    // read-only storage buffers (no sampled textures).
+    if (!srvRanges.empty())
+    {
+        D3D12_ROOT_PARAMETER& srvParam               = rootParams.emplace_back();
+        srvParam.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        srvParam.DescriptorTable.NumDescriptorRanges = static_cast<UINT>(srvRanges.size());
+        srvParam.DescriptorTable.pDescriptorRanges   = srvRanges.data();
+        srvParam.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
+        _srvRootIndex                                = rootIndex++;
     }
 
     if (!uavRanges.empty())

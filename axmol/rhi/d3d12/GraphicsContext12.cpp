@@ -255,6 +255,9 @@ GraphicsContextImpl::~GraphicsContextImpl()
 {
     _driver->waitForGPU();
 
+    for (auto& pipelines : _inFlightComputePipelines)
+        pipelines.clear();
+
     if (!_frameCompletionOps.empty())
     {
         for (auto&& op : _frameCompletionOps)
@@ -359,6 +362,9 @@ bool GraphicsContextImpl::beginFrame()
     auto& currentFence   = _inflightFences[_frameIndex];
     _completedFenceValue = currentFence.wait();
     _driver->processDisposalQueue(_completedFenceValue);
+
+    // Release compute pipelines retained for this frame now that its fence has completed.
+    _inFlightComputePipelines[_frameIndex].clear();
 
     if (!_frameCompletionOps.empty())
     {
@@ -831,6 +837,31 @@ void GraphicsContextImpl::prepareDrawing(ID3D12GraphicsCommandList* cmd)
 
         int maxSlot = -1;
 
+        // Transition storage buffers from compute write state (UAV) to graphics
+        // read state (SRV) before the draw consumes them.
+        tlx::pod_vector<D3D12_RESOURCE_BARRIER> storageBarriers;
+        constexpr D3D12_RESOURCE_STATES storageTargetState =
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        for (auto& [binding, bindingSet] : storageBindingSets)
+        {
+            if (!bindingSet.buffer)
+                continue;
+            auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+            bufferImpl->setLastFenceValue(_frameFenceValue);
+            if (bufferImpl->currentState() != storageTargetState)
+            {
+                D3D12_RESOURCE_BARRIER& bar = storageBarriers.emplace_back();
+                bar.Type                    = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                bar.Transition.pResource    = bufferImpl->internalResource();
+                bar.Transition.StateBefore  = bufferImpl->currentState();
+                bar.Transition.StateAfter   = storageTargetState;
+                bar.Transition.Subresource  = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                bufferImpl->_resourceState  = storageTargetState;
+            }
+        }
+        if (!storageBarriers.empty())
+            cmd->ResourceBarrier(static_cast<UINT>(storageBarriers.size()), storageBarriers.data());
+
         // Copy storage buffer SRVs (bound first in the SRV table).
         for (auto& [binding, bindingSet] : storageBindingSets)
         {
@@ -1130,6 +1161,11 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     cmd->SetComputeRootSignature(computePipeline->getRootSignature());
     cmd->SetPipelineState(computePipeline->getPipeline());
 
+    // Compute uses the same command list: invalidate the graphics pipeline
+    // cache so a later draw re-binds its root signature and PSO.
+    _boundRootSig = nullptr;
+    _boundPSO     = nullptr;
+
     // Bind uniform blocks via CBV root parameters.
     auto& callbackUniforms = desc.programState->getCallbackUniforms();
     for (auto& cb : callbackUniforms)
@@ -1154,7 +1190,23 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     const UINT bindingStart = _srvOffset[_frameIndex];
     UINT slot               = 0;
 
-    // Copy SRV descriptors (textures + read-only storage buffers) in root-signature range order.
+    // Copy SRV descriptors (read-only storage buffers, then textures) in
+    // root-signature range order (ComputePipeline12::createRootSignature).
+    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    {
+        if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_ONLY)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        bufferImpl->setLastFenceValue(_frameFenceValue);
+        auto srvHandle = bufferImpl->getSRV();
+        if (!srvHandle)
+            continue;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE dst = srvCpuStart;
+        dst.ptr += (bindingStart + slot) * srvStride;
+        _device->CopyDescriptorsSimple(1, dst, srvHandle->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        ++slot;
+    }
     for (const auto& [bindingIndex, bindingSet] : desc.programState->getTextureBindingSets())
     {
         for (auto tex : bindingSet.texs)
@@ -1171,20 +1223,6 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
             ++slot;
         }
     }
-    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
-    {
-        if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_ONLY)
-            continue;
-        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
-        auto srvHandle  = bufferImpl->getSRV();
-        if (!srvHandle)
-            continue;
-
-        D3D12_CPU_DESCRIPTOR_HANDLE dst = srvCpuStart;
-        dst.ptr += (bindingStart + slot) * srvStride;
-        _device->CopyDescriptorsSimple(1, dst, srvHandle->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        ++slot;
-    }
     const UINT srvCount = slot;
 
     // Copy UAV descriptors (read-write storage buffers).
@@ -1193,6 +1231,7 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_WRITE)
             continue;
         auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        bufferImpl->setLastFenceValue(_frameFenceValue);
         auto uavHandle  = bufferImpl->getUAV();
         if (!uavHandle)
             continue;
@@ -1275,8 +1314,7 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 
     // The D3D12 command list does not retain the PSO; keep the pipeline alive
     // until the GPU has finished executing this frame.
-    computePipeline->retain();
-    _frameCompletionOps.emplace_back([computePipeline](uint64_t) { computePipeline->release(); });
+    _inFlightComputePipelines[_frameIndex].emplace_back(computePipeline);
 
     _programState = nullptr;
     return true;
