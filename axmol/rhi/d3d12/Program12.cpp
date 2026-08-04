@@ -35,6 +35,8 @@ ProgramImpl::ProgramImpl(Data& csData) : Program(csData) {}
 
 ProgramImpl::~ProgramImpl()
 {
-    static_cast<GraphicsDeviceImpl*>(axdrv)->removeCachedPipelineObjects(this);
+    auto gfxDevice = static_cast<GraphicsDeviceImpl*>(GraphicsCore::device());
+    if (gfxDevice)
+        gfxDevice->removeCachedPipelineObjects(this);
 }
 }  // namespace ax::rhi::d3d12
