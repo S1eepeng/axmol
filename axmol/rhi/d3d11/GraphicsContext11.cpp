@@ -641,7 +641,7 @@ void GraphicsContextImpl::endRenderPass()
 
 bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 {
-    if (!desc.programState)
+    if (!desc.programState || !desc.pipeline)
         return false;
 
     auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());

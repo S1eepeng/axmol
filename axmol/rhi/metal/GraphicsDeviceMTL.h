@@ -138,6 +138,7 @@ public:
      * @return A RenderPipeline object.
      */
     RenderPipeline* createRenderPipeline() override;
+    ComputePipeline* createComputePipeline(Program* program) override;
 
     Program* createProgram(Data vsData, Data fsData) override;
 

@@ -33,8 +33,9 @@ namespace ax::rhi::vk
 {
 
 ComputePipelineImpl::ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl* program)
-    : _driver(driver), _device(driver->getDevice()), _program(program)
+    : _driver(driver), _device(driver->getDevice())
 {
+    setProgram(program);
     createLayout(program);
     createPipeline(program);
 }
@@ -226,7 +227,8 @@ DescriptorState* ComputePipelineImpl::acquireDescriptorState()
     }
 
     auto descriptorState = _descriptorStatePool.construt();
-    descriptorState->progId = _program->getProgramId();
+    descriptorState->progId           = getProgram()->getProgramId();
+    descriptorState->computePipeline  = this;
     _descriptorAllocator.allocateDescriptorSets(&_layoutState, descriptorState);
     return descriptorState;
 }
@@ -235,7 +237,7 @@ void ComputePipelineImpl::recycleDescriptorState(DescriptorState* descriptorStat
 {
     if (!descriptorState)
         return;
-    if (_program && descriptorState->progId == _program->getProgramId())
+    if (descriptorState->computePipeline == this)
     {
         _layoutState.descriptorFreeList.push_back(descriptorState);
         return;

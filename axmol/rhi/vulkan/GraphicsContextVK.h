@@ -34,7 +34,6 @@ class RenderPipelineImpl;
 class RenderTargetImpl;
 class GraphicsDeviceImpl;
 class SemaphorePool;
-class ComputePipelineImpl;
 
 enum class DynamicStateBits : uint32_t
 {
@@ -211,9 +210,6 @@ private:
     BufferImpl* _instanceBuffer{nullptr};
 
     VkPipeline _boundPipeline{VK_NULL_HANDLE};
-
-    // Compute pipelines cached per program id.
-    tlx::hash_map<uint64_t, ComputePipelineImpl*> _computePipelines;
 
 #pragma region Uniform ring buffer
 

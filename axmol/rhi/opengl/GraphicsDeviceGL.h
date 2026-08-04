@@ -104,6 +104,7 @@ public:
      * @return A RenderPipeline object.
      */
     RenderPipeline* createRenderPipeline() override;
+    ComputePipeline* createComputePipeline(Program* program) override;
 
     /**
      * New a Program, not auto released.

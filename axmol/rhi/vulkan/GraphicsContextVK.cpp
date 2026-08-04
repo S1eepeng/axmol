@@ -182,9 +182,6 @@ GraphicsContextImpl::~GraphicsContextImpl()
         }
         computeDescriptorStates.clear();
     }
-    for (auto& [_, computePipeline] : _computePipelines)
-        delete computePipeline;
-    _computePipelines.clear();
 
     AX_SAFE_RELEASE_NULL(_screenRT);
     _driver->destroyStaleResources();
@@ -599,9 +596,8 @@ bool GraphicsContextImpl::beginFrame()
     auto& computeDescriptorStates = _inFlightComputeDescriptorStates[_frameIndex];
     for (auto descriptorState : computeDescriptorStates)
     {
-        auto it = _computePipelines.find(descriptorState->progId);
-        if (it != _computePipelines.end())
-            it->second->recycleDescriptorState(descriptorState);
+        if (descriptorState->computePipeline)
+            descriptorState->computePipeline->recycleDescriptorState(descriptorState);
         else if (descriptorState->pool)
             descriptorState->pool->getAllocator()->freeDescriptorSets(descriptorState);
     }
@@ -1066,13 +1062,6 @@ void GraphicsContextImpl::removeCachedPipelineObjects(Program* key)
 {
     if (_renderPipeline)
         _renderPipeline->removeCachedObjects(key);
-
-    auto it = _computePipelines.find(key->getProgramId());
-    if (it != _computePipelines.end())
-    {
-        delete it->second;
-        _computePipelines.erase(it);
-    }
 }
 
 void GraphicsContextImpl::prepareDrawing()
@@ -1285,7 +1274,7 @@ void GraphicsContextImpl::drawArrays(size_t start, size_t count, bool /*wirefram
 
 bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 {
-    if (!desc.programState)
+    if (!desc.programState || !desc.pipeline)
         return false;
 
     auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
@@ -1294,10 +1283,7 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 
     _programState = desc.programState;
 
-    // Create / fetch the compute pipeline for this program.
-    auto& computePipeline = _computePipelines[program->getProgramId()];
-    if (!computePipeline)
-        computePipeline = new ComputePipelineImpl(_driver, program);
+    auto* computePipeline = static_cast<ComputePipelineImpl*>(desc.pipeline);
     if (computePipeline->getPipeline() == VK_NULL_HANDLE)
         return false;
 

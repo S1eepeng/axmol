@@ -24,44 +24,25 @@
 #pragma once
 
 #include "axmol/rhi/ComputePipeline.h"
-#include "axmol/rhi/vulkan/RenderPipelineVK.h"
-#include <glad/vulkan.h>
+#include <Metal/Metal.h>
 
-namespace ax::rhi::vk
+namespace ax::rhi::metal
 {
 class ProgramImpl;
-class GraphicsDeviceImpl;
 
 /**
- * @brief A Vulkan compute pipeline with its own descriptor layout.
- *
- * Descriptor sets mirror the graphics model:
- *   set 0: uniform buffers
- *   set 1: storage buffers (unshifted binding) + sampled images (unshifted) + preset samplers (shifted)
- *   set 2: custom samplers (shifted)
+ * @brief A Metal compute pipeline (MTLComputePipelineState) for a compute program.
  */
 class ComputePipelineImpl : public ComputePipeline
 {
 public:
-    ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl* program);
+    ComputePipelineImpl(id<MTLDevice> mtlDevice, ProgramImpl* program);
     ~ComputePipelineImpl();
 
-    VkPipeline getPipeline() const { return _pipeline; }
-    PipelineLayoutState* getLayoutState() { return &_layoutState; }
-
-    DescriptorState* acquireDescriptorState();
-    void recycleDescriptorState(DescriptorState* descriptorState);
+    id<MTLComputePipelineState> getMTLComputePipelineState() const { return _mtlComputePipelineState; }
 
 private:
-    void createLayout(ProgramImpl* program);
-    void createPipeline(ProgramImpl* program);
-
-    GraphicsDeviceImpl* _driver{nullptr};
-    VkDevice _device{VK_NULL_HANDLE};
-    PipelineLayoutState _layoutState{};
-    DescriptorAllocator _descriptorAllocator{};
-    yasio::object_pool<DescriptorState> _descriptorStatePool;
-    VkPipeline _pipeline{VK_NULL_HANDLE};
+    id<MTLComputePipelineState> _mtlComputePipelineState = nil;
 };
 
-}  // namespace ax::rhi::vk
+}  // namespace ax::rhi::metal

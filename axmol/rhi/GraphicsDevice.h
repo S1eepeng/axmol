@@ -43,6 +43,7 @@ class GraphicsContext;
 class Buffer;
 class ShaderModule;
 class RenderPipeline;
+class ComputePipeline;
 class RenderPass;
 class RenderTarget;
 
@@ -161,6 +162,13 @@ public:
      * @return A RenderPipeline object.
      */
     virtual RenderPipeline* createRenderPipeline() = 0;
+
+    /**
+     * Create a compute pipeline from a compute program, not auto released.
+     * @param program Specifies the compute program.
+     * @return A ComputePipeline object.
+     */
+    virtual ComputePipeline* createComputePipeline(Program* program) = 0;
 
     /**
      * Create an auto released Program.

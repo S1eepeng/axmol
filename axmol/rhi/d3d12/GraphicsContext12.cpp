@@ -255,10 +255,6 @@ GraphicsContextImpl::~GraphicsContextImpl()
 {
     _driver->waitForGPU();
 
-    for (auto& [_, computePipeline] : _computePipelines)
-        delete computePipeline;
-    _computePipelines.clear();
-
     AX_SAFE_RELEASE_NULL(_screenRT);
     AX_SAFE_RELEASE_NULL(_renderPipeline);
 
@@ -1097,20 +1093,13 @@ void GraphicsContextImpl::removeCachedPipelineObjects(Program* key)
 {
     if (_renderPipeline)
         _renderPipeline->removeCachedObjects(key);
-
-    auto it = _computePipelines.find(key->getProgramId());
-    if (it != _computePipelines.end())
-    {
-        delete it->second;
-        _computePipelines.erase(it);
-    }
 }
 
 bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 {
     if (!_inFrame || !_currentCmdList)
         return false;
-    if (!desc.programState)
+    if (!desc.programState || !desc.pipeline)
         return false;
 
     auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
@@ -1119,9 +1108,7 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 
     _programState = desc.programState;
 
-    auto& computePipeline = _computePipelines[program->getProgramId()];
-    if (!computePipeline)
-        computePipeline = new ComputePipelineImpl(_driver, program);
+    auto* computePipeline = static_cast<ComputePipelineImpl*>(desc.pipeline);
     if (!computePipeline->getPipeline())
         return false;
 

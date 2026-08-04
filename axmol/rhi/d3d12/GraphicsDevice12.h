@@ -129,6 +129,7 @@ public:
     RenderTarget* createRenderTarget(Texture* colorAttachment, Texture* depthStencilAttachment) override;
     DepthStencilState* createDepthStencilState() override;
     RenderPipeline* createRenderPipeline() override;
+    ComputePipeline* createComputePipeline(Program* program) override;
     Program* createProgram(Data vsData, Data fsData) override;
 
     Program* createComputeProgram(Data csData) override;

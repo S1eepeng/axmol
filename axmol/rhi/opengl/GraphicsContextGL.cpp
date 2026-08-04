@@ -659,7 +659,7 @@ bool GraphicsContextImpl::copyTexture(RenderTarget* src, Texture* dst)
 bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 {
 #if AX_GL_HAS_COMPUTE
-    if (!desc.programState)
+    if (!desc.programState || !desc.pipeline)
         return false;
 
     auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());

@@ -32,6 +32,7 @@ namespace ax::rhi::d3d12
 
 ComputePipelineImpl::ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl* program) : _driver(driver)
 {
+    setProgram(program);
     createRootSignature(program);
     createPipeline(program);
 }

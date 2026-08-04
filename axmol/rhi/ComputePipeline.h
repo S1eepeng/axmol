@@ -21,47 +21,46 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE.
  ****************************************************************************/
+
 #pragma once
 
-#include "axmol/rhi/ComputePipeline.h"
-#include "axmol/rhi/vulkan/RenderPipelineVK.h"
-#include <glad/vulkan.h>
+#include "axmol/base/Object.h"
+#include "axmol/rhi/RHITypes.h"
 
-namespace ax::rhi::vk
+namespace ax::rhi
 {
-class ProgramImpl;
-class GraphicsDeviceImpl;
+/**
+ * @addtogroup _rhi
+ * @{
+ */
+class Program;
 
 /**
- * @brief A Vulkan compute pipeline with its own descriptor layout.
+ * @brief Compute pipeline (backed by a backend compute PSO / dispatch pipeline).
  *
- * Descriptor sets mirror the graphics model:
- *   set 0: uniform buffers
- *   set 1: storage buffers (unshifted binding) + sampled images (unshifted) + preset samplers (shifted)
- *   set 2: custom samplers (shifted)
+ * Mirrors RenderPipeline for the graphics pipeline: a dispatch carries a
+ * ComputePipeline (the compiled compute pipeline state) together with a
+ * ProgramState (bound resources). The local workgroup size belongs to the
+ * program (shader reflection), never to the dispatch.
  */
-class ComputePipelineImpl : public ComputePipeline
+class ComputePipeline : public ax::Object
 {
 public:
-    ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl* program);
-    ~ComputePipelineImpl();
+    /**
+     * Get the compute program this pipeline was created from.
+     * @return The compute program.
+     */
+    Program* getProgram() const { return _program; }
 
-    VkPipeline getPipeline() const { return _pipeline; }
-    PipelineLayoutState* getLayoutState() { return &_layoutState; }
+protected:
+    void setProgram(Program* program);
 
-    DescriptorState* acquireDescriptorState();
-    void recycleDescriptorState(DescriptorState* descriptorState);
+    virtual ~ComputePipeline() = default;
 
 private:
-    void createLayout(ProgramImpl* program);
-    void createPipeline(ProgramImpl* program);
-
-    GraphicsDeviceImpl* _driver{nullptr};
-    VkDevice _device{VK_NULL_HANDLE};
-    PipelineLayoutState _layoutState{};
-    DescriptorAllocator _descriptorAllocator{};
-    yasio::object_pool<DescriptorState> _descriptorStatePool;
-    VkPipeline _pipeline{VK_NULL_HANDLE};
+    Program* _program = nullptr;
 };
 
-}  // namespace ax::rhi::vk
+// end of _rhi group
+/// @}
+}  // namespace ax::rhi

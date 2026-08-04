@@ -23,6 +23,7 @@
  ****************************************************************************/
 
 #include "ComputeShaderTest.h"
+#include "axmol/rhi/ComputePipeline.h"
 #include "axmol/rhi/GraphicsCore.h"
 #include "axmol/rhi/VertexLayout.h"
 #include "axmol/renderer/Renderer.h"
@@ -58,6 +59,7 @@ ComputeDispatchTest::~ComputeDispatchTest()
     AX_SAFE_RELEASE(_vertexLayout);
     AX_SAFE_RELEASE(_renderState);
     AX_SAFE_RELEASE(_computeState);
+    AX_SAFE_RELEASE(_computePipeline);
     AX_SAFE_RELEASE(_computeProgram);
 
     ProgramManager::getInstance()->unloadProgram(_renderProgram);
@@ -75,6 +77,9 @@ bool ComputeDispatchTest::init()
     // Compute program: writes a gradient into the storage buffer.
     _computeProgram = device->createComputeProgram(loadArchive("custom/compute_dispatch_cs"));
     if (!_computeProgram || !_computeProgram->isValid())
+        return true;
+    _computePipeline = device->createComputePipeline(_computeProgram);
+    if (!_computePipeline)
         return true;
     _computeState = new rhi::ProgramState(_computeProgram);
     _computeState->setStorageBuffer(0, nullptr, rhi::BufferAccess::READ_WRITE);
@@ -153,15 +158,13 @@ void ComputeDispatchTest::dispatchCompute(ax::Renderer* renderer)
         return;
 
     rhi::ComputeDispatchDesc desc;
+    desc.pipeline     = _computePipeline;
     desc.programState = _computeState;
     desc.groupCountX  = 1;  // 16 threads in one group
     desc.groupCountY  = 1;
     desc.groupCountZ  = 1;
-    desc.threadCountX = kColorCount;
-    desc.threadCountY = 1;
-    desc.threadCountZ = 1;
 
-    context->dispatch(desc);
+    AXASSERT(context->dispatch(desc), "Compute dispatch failed");
 }
 
 void ComputeDispatchTest::setupDrawCommand(ax::Renderer* renderer)

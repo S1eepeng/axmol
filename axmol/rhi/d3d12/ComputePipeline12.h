@@ -23,6 +23,7 @@
  ****************************************************************************/
 #pragma once
 
+#include "axmol/rhi/ComputePipeline.h"
 #include "axmol/rhi/d3d12/DescriptorHeapAllocator12.h"
 #include <d3d12.h>
 
@@ -40,7 +41,7 @@ class GraphicsDeviceImpl;
  *   - UAV descriptor table (space 1) for read-write storage buffers
  *   - Sampler descriptor tables (space 1 presets, space 2 custom)
  */
-class ComputePipelineImpl
+class ComputePipelineImpl : public ComputePipeline
 {
 public:
     ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl* program);

@@ -259,9 +259,6 @@ private:
     id<MTLRenderCommandEncoder> _mtlRenderEncoder = nil;
     id<MTLBuffer> _mtlIndexBuffer                 = nil;
 
-    // Compute pipelines cached per program id (retained).
-    tlx::hash_map<uint64_t, id<MTLComputePipelineState>> _computePipelines;
-
     DepthStencilStateImpl* _depthStencilState = nullptr;
     RenderPipelineImpl* _renderPipeline       = nullptr;
 

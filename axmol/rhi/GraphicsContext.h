@@ -45,6 +45,7 @@ namespace ax::rhi
 struct PipelineDesc;
 class RenderPass;
 class RenderPipeline;
+class ComputePipeline;
 class Buffer;
 class DepthStencilState;
 class Texture;
@@ -52,14 +53,11 @@ class RenderTarget;
 struct DepthStencilDesc;
 struct ComputeDispatchDesc
 {
+    ComputePipeline* pipeline = nullptr;
     ProgramState* programState = nullptr;
     uint32_t groupCountX       = 1;
     uint32_t groupCountY       = 1;
     uint32_t groupCountZ       = 1;
-    // Local workgroup (threadgroup) size. Only required by Metal dispatchThreadgroups.
-    uint32_t threadCountX = 1;
-    uint32_t threadCountY = 1;
-    uint32_t threadCountZ = 1;
 };
 
 /**

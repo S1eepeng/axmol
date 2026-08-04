@@ -12,6 +12,7 @@ set(_AX_RHI_HEADER
   rhi/ProgramState.h
   rhi/RenderPassDesc.h
   rhi/RenderPipeline.h
+  rhi/ComputePipeline.h
   rhi/RenderTarget.h
   rhi/ShaderCache.h
   rhi/ShaderModule.h
@@ -26,6 +27,7 @@ set(_AX_RHI_HEADER
 
 set(_AX_RHI_SRC
   rhi/GraphicsContext.cpp
+  rhi/ComputePipeline.cpp
   rhi/DepthStencilState.cpp
   rhi/GraphicsDevice.cpp
   rhi/ShaderModule.cpp
@@ -51,6 +53,7 @@ if(AX_ENABLE_GL)
     rhi/opengl/MacrosGL.h
     rhi/opengl/ProgramGL.h
     rhi/opengl/RenderPipelineGL.h
+    rhi/opengl/ComputePipelineGL.h
     rhi/opengl/RenderTargetGL.h
     rhi/opengl/ShaderModuleGL.h
     rhi/opengl/TextureGL.h
@@ -83,6 +86,7 @@ if(AX_ENABLE_MTL)
     rhi/metal/DepthStencilStateMTL.h
     rhi/metal/GraphicsDeviceMTL.h
     rhi/metal/RenderPipelineMTL.h
+    rhi/metal/ComputePipelineMTL.h
     rhi/metal/ShaderModuleMTL.h
     rhi/metal/TextureMTL.h
     rhi/metal/UtilsMTL.h
@@ -97,6 +101,7 @@ if(AX_ENABLE_MTL)
     rhi/metal/DepthStencilStateMTL.mm
     rhi/metal/GraphicsDeviceMTL.mm
     rhi/metal/RenderPipelineMTL.mm
+    rhi/metal/ComputePipelineMTL.mm
     rhi/metal/ShaderModuleMTL.mm
     rhi/metal/TextureMTL.mm
     rhi/metal/UtilsMTL.mm
@@ -112,6 +117,7 @@ if(AX_ENABLE_D3D11)
     rhi/d3d11/DepthStencilState11.h
     rhi/d3d11/GraphicsDevice11.h
     rhi/d3d11/RenderPipeline11.h
+    rhi/d3d11/ComputePipeline11.h
     rhi/d3d11/ShaderModule11.h
     rhi/d3d11/Texture11.h
     rhi/d3d11/Program11.h

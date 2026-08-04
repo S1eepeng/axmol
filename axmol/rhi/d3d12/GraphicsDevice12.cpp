@@ -29,6 +29,7 @@
 #include "axmol/rhi/d3d12/ShaderModule12.h"
 #include "axmol/rhi/d3d12/RenderTarget12.h"
 #include "axmol/rhi/d3d12/RenderPipeline12.h"
+#include "axmol/rhi/d3d12/ComputePipeline12.h"
 #include "axmol/rhi/d3d12/DepthStencilState12.h"
 #include "axmol/rhi/d3d12/VertexLayout12.h"
 #include "axmol/base/Logging.h"
@@ -598,6 +599,11 @@ DepthStencilState* GraphicsDeviceImpl::createDepthStencilState()
 RenderPipeline* GraphicsDeviceImpl::createRenderPipeline()
 {
     return new RenderPipelineImpl(this);
+}
+
+ComputePipeline* GraphicsDeviceImpl::createComputePipeline(Program* program)
+{
+    return new ComputePipelineImpl(this, static_cast<ProgramImpl*>(program));
 }
 
 Program* GraphicsDeviceImpl::createProgram(Data vsData, Data fsData)

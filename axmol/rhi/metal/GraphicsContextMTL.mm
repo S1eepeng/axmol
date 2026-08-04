@@ -27,6 +27,7 @@
 #include "axmol/rhi/metal/BufferMTL.h"
 #include "axmol/rhi/metal/GraphicsDeviceMTL.h"
 #include "axmol/rhi/metal/RenderPipelineMTL.h"
+#include "axmol/rhi/metal/ComputePipelineMTL.h"
 #include "axmol/rhi/metal/TextureMTL.h"
 #include "axmol/rhi/metal/UtilsMTL.h"
 #include "axmol/rhi/metal/BufferManager.h"
@@ -196,10 +197,6 @@ GraphicsContextImpl::~GraphicsContextImpl()
 
     AX_SAFE_RELEASE_NULL(_screenRT);
     AX_SAFE_RELEASE_NULL(_renderPipeline);
-
-    for (auto& [_, computePipeline] : _computePipelines)
-        [computePipeline release];
-    _computePipelines.clear();
 
     [oneOffBuffer release];
 
@@ -390,15 +387,16 @@ void GraphicsContextImpl::endRenderPass()
 
 bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 {
-    if (!desc.programState)
+    if (!desc.programState || !desc.pipeline)
         return false;
 
     auto program = static_cast<ProgramImpl*>(desc.programState->getProgram());
     if (!program || !program->getCSModule())
         return false;
 
-    auto function = program->getMTLComputeFunction();
-    if (function == nil)
+    auto* computePipeline = static_cast<ComputePipelineImpl*>(desc.pipeline);
+    id<MTLComputePipelineState> pipelineState = computePipeline->getMTLComputePipelineState();
+    if (pipelineState == nil)
         return false;
 
     // Compute runs outside render passes: end any active render encoder so the
@@ -411,22 +409,8 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         _mtlRenderEncoder = nil;
     }
 
-    id<MTLComputePipelineState> computePipeline = _computePipelines[program->getProgramId()];
-    if (computePipeline == nil)
-    {
-        NSError* error = nil;
-        computePipeline =
-            [[_mtlCmdQueue.device newComputePipelineStateWithFunction:function error:&error] retain];
-        if (computePipeline == nil)
-        {
-            NSLog(@"Failed to create Metal compute pipeline: %@", error);
-            return false;
-        }
-        _computePipelines[program->getProgramId()] = computePipeline;
-    }
-
     id<MTLComputeCommandEncoder> computeEncoder = [_currentCmdBuffer computeCommandEncoder];
-    [computeEncoder setComputePipelineState:computePipeline];
+    [computeEncoder setComputePipelineState:pipelineState];
 
     _programState = desc.programState;
 
@@ -490,8 +474,10 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         [computeEncoder setBuffer:mtlBuffer offset:0 atIndex:binding];
     }
 
+    const auto& localSize = desc.programState->getProgram()->getComputeLocalSize();
     MTLSize threadgroupsPerGrid = MTLSizeMake(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
-    MTLSize threadsPerThreadgroup = MTLSizeMake(desc.threadCountX, desc.threadCountY, desc.threadCountZ);
+    MTLSize threadsPerThreadgroup =
+        MTLSizeMake(std::max(localSize[0], 1), std::max(localSize[1], 1), std::max(localSize[2], 1));
     [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
     [computeEncoder endEncoding];
 

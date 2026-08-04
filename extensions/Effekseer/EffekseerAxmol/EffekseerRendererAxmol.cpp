@@ -2,6 +2,7 @@
 
 #include "axmol/rhi/GraphicsDevice.h"
 #include "axmol/rhi/GraphicsCore.h"
+#include "axmol/rhi/ComputePipeline.h"
 #include "axmol/rhi/RenderTarget.h"
 #include "axmol/rhi/VertexLayout.h"
 #include "axmol/rhi/ShaderCache.h"
@@ -319,9 +320,14 @@ class PipelineStateAX : public Effekseer::Backend::PipelineState
 {
 public:
     Effekseer::Backend::PipelineStateParameter param;
-    ax::rhi::ProgramState* programState = nullptr;  // owned
+    ax::rhi::ProgramState* programState = nullptr;      // owned
+    ax::rhi::ComputePipeline* computePipeline = nullptr; // owned, lazily created for compute dispatch
 
-    ~PipelineStateAX() override { AX_SAFE_RELEASE(programState); }
+    ~PipelineStateAX() override
+    {
+        AX_SAFE_RELEASE(programState);
+        AX_SAFE_RELEASE(computePipeline);
+    }
 };
 
 class ShaderAX : public Effekseer::Backend::Shader
@@ -518,14 +524,16 @@ public:
 
         bindResources(ps, command.ResourceBinders, Effekseer::Backend::DispatchParameter::ResourceSlotCount);
 
+        if (!pipeline->computePipeline)
+            pipeline->computePipeline =
+                ax::rhi::GraphicsCore::device()->createComputePipeline(ps->getProgram());
+
         ax::rhi::ComputeDispatchDesc desc;
+        desc.pipeline     = pipeline->computePipeline;
         desc.programState = ps;
         desc.groupCountX  = static_cast<uint32_t>(command.GroupCount[0]);
         desc.groupCountY  = static_cast<uint32_t>(command.GroupCount[1]);
         desc.groupCountZ  = static_cast<uint32_t>(command.GroupCount[2]);
-        desc.threadCountX = static_cast<uint32_t>(command.ThreadCount[0]);
-        desc.threadCountY = static_cast<uint32_t>(command.ThreadCount[1]);
-        desc.threadCountZ = static_cast<uint32_t>(command.ThreadCount[2]);
 
         auto context = _renderer && _renderer->getAxRenderer() ? _renderer->getAxRenderer()->getContext() : nullptr;
         if (context)

@@ -24,44 +24,19 @@
 #pragma once
 
 #include "axmol/rhi/ComputePipeline.h"
-#include "axmol/rhi/vulkan/RenderPipelineVK.h"
-#include <glad/vulkan.h>
+#include "axmol/rhi/opengl/ProgramGL.h"
 
-namespace ax::rhi::vk
+namespace ax::rhi::gl
 {
-class ProgramImpl;
-class GraphicsDeviceImpl;
-
 /**
- * @brief A Vulkan compute pipeline with its own descriptor layout.
- *
- * Descriptor sets mirror the graphics model:
- *   set 0: uniform buffers
- *   set 1: storage buffers (unshifted binding) + sampled images (unshifted) + preset samplers (shifted)
- *   set 2: custom samplers (shifted)
+ * @brief An OpenGL compute pipeline. OpenGL has no compute PSO; this object
+ * binds a compute program for API symmetry with the other backends.
  */
 class ComputePipelineImpl : public ComputePipeline
 {
 public:
-    ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl* program);
-    ~ComputePipelineImpl();
-
-    VkPipeline getPipeline() const { return _pipeline; }
-    PipelineLayoutState* getLayoutState() { return &_layoutState; }
-
-    DescriptorState* acquireDescriptorState();
-    void recycleDescriptorState(DescriptorState* descriptorState);
-
-private:
-    void createLayout(ProgramImpl* program);
-    void createPipeline(ProgramImpl* program);
-
-    GraphicsDeviceImpl* _driver{nullptr};
-    VkDevice _device{VK_NULL_HANDLE};
-    PipelineLayoutState _layoutState{};
-    DescriptorAllocator _descriptorAllocator{};
-    yasio::object_pool<DescriptorState> _descriptorStatePool;
-    VkPipeline _pipeline{VK_NULL_HANDLE};
+    explicit ComputePipelineImpl(ProgramImpl* program) { setProgram(program); }
+    ~ComputePipelineImpl() override = default;
 };
 
-}  // namespace ax::rhi::vk
+}  // namespace ax::rhi::gl

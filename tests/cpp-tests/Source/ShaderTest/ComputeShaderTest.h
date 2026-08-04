@@ -51,6 +51,7 @@ private:
 
     ax::rhi::Program* _computeProgram  = nullptr;
     ax::rhi::ProgramState* _computeState = nullptr;
+    ax::rhi::ComputePipeline* _computePipeline = nullptr;
     ax::rhi::Program* _renderProgram   = nullptr;
     ax::rhi::ProgramState* _renderState  = nullptr;
     ax::rhi::Buffer* _storageBuffer    = nullptr;
