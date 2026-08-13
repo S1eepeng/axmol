@@ -1292,6 +1292,41 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     if (!program || !program->getCSModule())
         return false;
 
+    const auto& storageBindings = desc.programState->getStorageBufferBindingSets();
+    for (const auto& storageInfo : program->getActiveStorageBufferInfos())
+    {
+        auto binding = storageBindings.find(storageInfo.binding);
+        if (binding == storageBindings.end() || !binding->second.buffer)
+        {
+            AXLOGE("Missing Vulkan compute storage buffer binding {} ({})", storageInfo.binding, storageInfo.name);
+            AXASSERT(false, "Missing Vulkan compute storage buffer binding");
+            return false;
+        }
+        if (binding->second.access != storageInfo.access)
+        {
+            AXLOGE("Vulkan compute storage buffer binding {} has incompatible access", storageInfo.binding);
+            AXASSERT(false, "Vulkan compute storage buffer access mismatch");
+            return false;
+        }
+
+        auto bufferImpl = static_cast<BufferImpl*>(binding->second.buffer);
+        if (storageInfo.access == BufferAccess::READ_WRITE)
+            bufferImpl->updateIndex();
+        if (bufferImpl->internalHandle() == VK_NULL_HANDLE)
+        {
+            AXLOGE("Vulkan compute storage buffer binding {} has no native buffer", storageInfo.binding);
+            AXASSERT(false, "Vulkan compute storage buffer has no native buffer");
+            return false;
+        }
+        if (storageInfo.sizeBytes != 0 && bufferImpl->getSize() < storageInfo.sizeBytes)
+        {
+            AXLOGE("Vulkan compute storage buffer binding {} is smaller than reflected size {}", storageInfo.binding,
+                   storageInfo.sizeBytes);
+            AXASSERT(false, "Vulkan compute storage buffer is too small");
+            return false;
+        }
+    }
+
     _programState = desc.programState;
 
     auto* computePipeline = static_cast<ComputePipelineImpl*>(desc.pipeline);

@@ -93,11 +93,11 @@ enum class BufferAccess : uint8_t
 
 struct BufferDesc
 {
-    size_t size          = 0;
-    uint32_t stride      = 0;
-    BufferType type      = BufferType::VERTEX;
-    BufferUsage usage    = BufferUsage::DYNAMIC;
-    BufferAccess access  = BufferAccess::READ_ONLY;
+    size_t size         = 0;
+    uint32_t stride     = 0;  ///< Logical storage element stride; native backends may use raw views.
+    BufferType type     = BufferType::VERTEX;
+    BufferUsage usage   = BufferUsage::DYNAMIC;
+    BufferAccess access = BufferAccess::READ_ONLY;
 };
 
 enum class ShaderStage : int16_t

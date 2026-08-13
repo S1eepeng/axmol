@@ -46,7 +46,7 @@ public:
     void visit(const ax::SceneRenderState& state, const ax::Mat4& parentTransform, uint32_t parentFlags) override;
 
 private:
-    void dispatchCompute(ax::Renderer* renderer);
+    bool dispatchCompute(ax::Renderer* renderer);
     void setupDrawCommand(ax::Renderer* renderer);
 
     ax::rhi::Program* _computeProgram  = nullptr;

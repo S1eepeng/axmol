@@ -53,7 +53,7 @@ public:
      * @param type     BufferType::VERTEX or BufferType::INDEX
      * @param usage    BufferUsage::STATIC / DYNAMIC / STREAM
      * @param initial  initial data
-     * @param stride   element stride in bytes for structured storage buffers (0 for raw buffers)
+     * @param stride   logical storage element stride in bytes (0 when unspecified)
      */
     BufferImpl(ID3D11Device* device,
                ID3D11DeviceContext* context,

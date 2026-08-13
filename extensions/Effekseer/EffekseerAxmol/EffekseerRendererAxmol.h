@@ -39,7 +39,7 @@ public:
     Effekseer::TrackRendererRef CreateTrackRenderer() override;
     Effekseer::GpuTimerRef CreateGpuTimer() override { return nullptr; }
     Effekseer::GpuParticleSystemRef CreateGpuParticleSystem(const Effekseer::GpuParticleSystem::Settings& settings = {}) override;
-    Effekseer::GpuParticleFactoryRef CreateGpuParticleFactory() override { return nullptr; }
+    Effekseer::GpuParticleFactoryRef CreateGpuParticleFactory() override;
 
     Effekseer::TextureLoaderRef CreateTextureLoader(Effekseer::FileInterfaceRef fileInterface = nullptr) override;
     Effekseer::ModelLoaderRef CreateModelLoader(Effekseer::FileInterfaceRef fileInterface = nullptr) override;

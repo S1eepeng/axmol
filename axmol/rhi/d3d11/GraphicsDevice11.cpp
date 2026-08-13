@@ -393,13 +393,26 @@ IUnknown* GraphicsDeviceImpl::compileShader(std::span<uint8_t> shaderCode, Shade
 #endif
 
     const char* stageProfile{nullptr};
-    if (_featureLevel >= D3D_FEATURE_LEVEL_11_0)
+    switch (stage)
     {
-        stageProfile = (stage == ShaderStage::VERTEX) ? "vs_5_0" : "ps_5_0";
-    }
-    else
-    {
-        stageProfile = (stage == ShaderStage::VERTEX) ? "vs_4_1" : "ps_4_1";
+    case ShaderStage::VERTEX:
+        stageProfile = _featureLevel >= D3D_FEATURE_LEVEL_11_0 ? "vs_5_0" : "vs_4_1";
+        break;
+    case ShaderStage::FRAGMENT:
+        stageProfile = _featureLevel >= D3D_FEATURE_LEVEL_11_0 ? "ps_5_0" : "ps_4_1";
+        break;
+    case ShaderStage::COMPUTE:
+        if (_featureLevel < D3D_FEATURE_LEVEL_11_0)
+        {
+            AXLOGE("axmol:ERROR: Compute shaders require D3D feature level 11.0 or newer");
+            AXASSERT(false, "Compute shader is unsupported by this D3D11 device");
+            return nullptr;
+        }
+        stageProfile = "cs_5_0";
+        break;
+    default:
+        AXASSERT(false, "Unsupported D3D11 shader stage");
+        return nullptr;
     }
 
     HRESULT hr = D3DCompile(shaderCode.data(), shaderCode.size(), nullptr, nullptr, nullptr, "main", stageProfile,
@@ -415,27 +428,44 @@ IUnknown* GraphicsDeviceImpl::compileShader(std::span<uint8_t> shaderCode, Shade
     }
 
     IUnknown* shader{nullptr};
-    if (stage == ShaderStage::VERTEX)
+    switch (stage)
+    {
+    case ShaderStage::VERTEX:
     {
         ComPtr<ID3D11VertexShader> vs;
         hr = _device->CreateVertexShader(outBlob->GetBufferPointer(), outBlob->GetBufferSize(), nullptr,
                                          vs.GetAddressOf());
         if (SUCCEEDED(hr))
             shader = vs.Detach();
+        break;
     }
-    else
+    case ShaderStage::FRAGMENT:
     {
         ComPtr<ID3D11PixelShader> ps;
         hr = _device->CreatePixelShader(outBlob->GetBufferPointer(), outBlob->GetBufferSize(), nullptr,
                                         ps.GetAddressOf());
         if (SUCCEEDED(hr))
             shader = ps.Detach();
+        break;
+    }
+    case ShaderStage::COMPUTE:
+    {
+        ComPtr<ID3D11ComputeShader> cs;
+        hr = _device->CreateComputeShader(outBlob->GetBufferPointer(), outBlob->GetBufferSize(), nullptr,
+                                          cs.GetAddressOf());
+        if (SUCCEEDED(hr))
+            shader = cs.Detach();
+        break;
+    }
+    default:
+        break;
     }
 
     if (!shader)
     {
         AXLOGE("axmol:ERROR: Failed to create shader, hr:{}", hr);
         AXASSERT(false, "Shader compile failed!");
+        SafeRelease(outBlob);
     }
 
     return shader;
@@ -444,18 +474,41 @@ IUnknown* GraphicsDeviceImpl::compileShader(std::span<uint8_t> shaderCode, Shade
 IUnknown* GraphicsDeviceImpl::createShaderFromBytecode(std::span<uint8_t> bytecode, ShaderStage stage)
 {
     IUnknown* shader = nullptr;
-    if (stage == ShaderStage::VERTEX)
+    HRESULT hr       = E_INVALIDARG;
+    switch (stage)
+    {
+    case ShaderStage::VERTEX:
     {
         ComPtr<ID3D11VertexShader> vs;
-        _device->CreateVertexShader(bytecode.data(), bytecode.size(), nullptr, vs.GetAddressOf());
-        shader = vs.Detach();
+        hr = _device->CreateVertexShader(bytecode.data(), bytecode.size(), nullptr, vs.GetAddressOf());
+        if (SUCCEEDED(hr))
+            shader = vs.Detach();
+        break;
     }
-    else
+    case ShaderStage::FRAGMENT:
     {
         ComPtr<ID3D11PixelShader> ps;
-        _device->CreatePixelShader(bytecode.data(), bytecode.size(), nullptr, ps.GetAddressOf());
-        shader = ps.Detach();
+        hr = _device->CreatePixelShader(bytecode.data(), bytecode.size(), nullptr, ps.GetAddressOf());
+        if (SUCCEEDED(hr))
+            shader = ps.Detach();
+        break;
     }
+    case ShaderStage::COMPUTE:
+    {
+        if (_featureLevel < D3D_FEATURE_LEVEL_11_0)
+            break;
+        ComPtr<ID3D11ComputeShader> cs;
+        hr = _device->CreateComputeShader(bytecode.data(), bytecode.size(), nullptr, cs.GetAddressOf());
+        if (SUCCEEDED(hr))
+            shader = cs.Detach();
+        break;
+    }
+    default:
+        break;
+    }
+
+    if (!shader)
+        AXLOGE("axmol:ERROR: Failed to create precompiled D3D11 shader, stage={}, hr:{}", static_cast<int>(stage), hr);
     return shader;
 }
 

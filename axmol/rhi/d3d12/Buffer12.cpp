@@ -97,7 +97,12 @@ BufferImpl::BufferImpl(GraphicsDeviceImpl* driver,
 
     // D3D12 forbids UAV access on UPLOAD heap resources; storage buffers must live in DEFAULT heap.
     if (type == BufferType::STORAGE)
+    {
+        AXASSERT(size > 0 && (size % sizeof(uint32_t)) == 0,
+                 "D3D storage buffer size must be a non-zero multiple of 4 bytes");
+        AXASSERT(stride == 0 || (size % stride) == 0, "Storage buffer size must be divisible by its logical stride");
         _heapType = D3D12_HEAP_TYPE_DEFAULT;
+    }
 
     _capacity = (type == BufferType::UNIFORM) ? alignTo(size, 256) : size;  // CB size must be 256-byte aligned in D3D12
 
@@ -140,17 +145,18 @@ void BufferImpl::createViews() const
 
     auto* device = _driver->getDevice();
 
-    if (_resourceFlags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)
+    if ((_resourceFlags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) && !_uav)
     {
         D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
-        uavDesc.ViewDimension     = D3D12_UAV_DIMENSION_BUFFER;
+        uavDesc.ViewDimension       = D3D12_UAV_DIMENSION_BUFFER;
         uavDesc.Buffer.FirstElement = 0;
-        uavDesc.Buffer.Flags        = static_cast<D3D12_BUFFER_UAV_FLAGS>(0);
-        if (_stride != 0)
+        if (_type == BufferType::STORAGE)
         {
-            uavDesc.Format                     = DXGI_FORMAT_UNKNOWN;
-            uavDesc.Buffer.NumElements         = static_cast<UINT>(_capacity / _stride);
-            uavDesc.Buffer.StructureByteStride = _stride;
+            // axslcc emits RWByteAddressBuffer for portable writable storage buffers.
+            uavDesc.Format                     = DXGI_FORMAT_R32_TYPELESS;
+            uavDesc.Buffer.NumElements         = static_cast<UINT>(_capacity / sizeof(uint32_t));
+            uavDesc.Buffer.StructureByteStride = 0;
+            uavDesc.Buffer.Flags               = D3D12_BUFFER_UAV_FLAG_RAW;
         }
         else
         {
@@ -158,31 +164,42 @@ void BufferImpl::createViews() const
             uavDesc.Buffer.NumElements = static_cast<UINT>(_capacity / 4);
         }
         _uav = _driver->allocateDescriptor(DisposableResource::Type::ShaderResourceView);
+        AXASSERT(_uav, "Failed to allocate D3D12 storage buffer UAV descriptor");
         if (_uav)
             device->CreateUnorderedAccessView(_resource.Get(), nullptr, &uavDesc, _uav->cpu);
     }
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-    if (_stride != 0)
+    if (!_srv)
     {
-        srvDesc.Format                        = DXGI_FORMAT_UNKNOWN;
-        srvDesc.Buffer.FirstElement           = 0;
-        srvDesc.Buffer.NumElements            = static_cast<UINT>(_capacity / _stride);
-        srvDesc.Buffer.StructureByteStride    = _stride;
-        srvDesc.Shader4ComponentMapping       = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    }
-    else
-    {
-        srvDesc.Format                  = DXGI_FORMAT_R32_UINT;
-        srvDesc.Buffer.FirstElement     = 0;
-        srvDesc.Buffer.NumElements      = static_cast<UINT>(_capacity / 4);
-        srvDesc.Buffer.StructureByteStride = 0;
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_BUFFER;
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Buffer.FirstElement     = 0;
+        if (_type == BufferType::STORAGE)
+        {
+            // axslcc emits ByteAddressBuffer for portable read-only storage buffers.
+            srvDesc.Format                     = DXGI_FORMAT_R32_TYPELESS;
+            srvDesc.Buffer.NumElements         = static_cast<UINT>(_capacity / sizeof(uint32_t));
+            srvDesc.Buffer.StructureByteStride = 0;
+            srvDesc.Buffer.Flags               = D3D12_BUFFER_SRV_FLAG_RAW;
+        }
+        else if (_stride != 0)
+        {
+            srvDesc.Format                     = DXGI_FORMAT_UNKNOWN;
+            srvDesc.Buffer.NumElements         = static_cast<UINT>(_capacity / _stride);
+            srvDesc.Buffer.StructureByteStride = _stride;
+        }
+        else
+        {
+            srvDesc.Format                     = DXGI_FORMAT_R32_UINT;
+            srvDesc.Buffer.NumElements         = static_cast<UINT>(_capacity / sizeof(uint32_t));
+            srvDesc.Buffer.StructureByteStride = 0;
+        }
+        _srv = _driver->allocateDescriptor(DisposableResource::Type::ShaderResourceView);
+        AXASSERT(_srv, "Failed to allocate D3D12 storage buffer SRV descriptor");
+        if (_srv)
+            device->CreateShaderResourceView(_resource.Get(), &srvDesc, _srv->cpu);
     }
-    _srv = _driver->allocateDescriptor(DisposableResource::Type::ShaderResourceView);
-    if (_srv)
-        device->CreateShaderResourceView(_resource.Get(), &srvDesc, _srv->cpu);
 }
 
 const DescriptorHandle* BufferImpl::getSRV() const

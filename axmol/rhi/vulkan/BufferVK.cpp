@@ -256,11 +256,14 @@ void BufferImpl::createNativeBuffer(const void* initial)
             }
         }
 
-        // Set active handle to nothing yet (will lazily switch on first write)
+        // A newly created buffer must be bindable even when the GPU performs the
+        // first write and no CPU updateData() call is needed.
         _buffer            = VK_NULL_HANDLE;
         _memory            = nullptr;
         _currentMappedData = nullptr;
         _currentFrameIndex = -1;
+        updateIndex();
+        AXASSERT(_buffer != VK_NULL_HANDLE && _memory != nullptr, "Failed to select initial dynamic buffer backing");
     }
     else
     {

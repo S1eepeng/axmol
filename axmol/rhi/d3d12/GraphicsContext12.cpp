@@ -1151,6 +1151,44 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     if (!program || !program->getCSModule())
         return false;
 
+    const auto& storageBindings = desc.programState->getStorageBufferBindingSets();
+    for (const auto& storageInfo : program->getActiveStorageBufferInfos())
+    {
+        auto binding = storageBindings.find(storageInfo.binding);
+        if (binding == storageBindings.end() || !binding->second.buffer)
+        {
+            AXLOGE("Missing D3D12 compute storage buffer binding {} ({})", storageInfo.binding, storageInfo.name);
+            AXASSERT(false, "Missing D3D12 compute storage buffer binding");
+            return false;
+        }
+        if (binding->second.access != storageInfo.access)
+        {
+            AXLOGE("D3D12 compute storage buffer binding {} has incompatible access", storageInfo.binding);
+            AXASSERT(false, "D3D12 compute storage buffer access mismatch");
+            return false;
+        }
+
+        auto bufferImpl = static_cast<BufferImpl*>(binding->second.buffer);
+        if (!bufferImpl->internalResource() ||
+            (storageInfo.sizeBytes != 0 && bufferImpl->getSize() < storageInfo.sizeBytes) ||
+            (storageInfo.arrayStride != 0 && bufferImpl->getStride() != storageInfo.arrayStride))
+        {
+            AXLOGE("D3D12 compute storage buffer binding {} does not match its reflected resource",
+                   storageInfo.binding);
+            AXASSERT(false, "D3D12 compute storage buffer resource mismatch");
+            return false;
+        }
+
+        const bool hasView = storageInfo.access == BufferAccess::READ_WRITE ? bufferImpl->getUAV() != nullptr
+                                                                            : bufferImpl->getSRV() != nullptr;
+        if (!hasView)
+        {
+            AXLOGE("D3D12 compute storage buffer binding {} has no native view", storageInfo.binding);
+            AXASSERT(false, "D3D12 compute storage buffer has no native view");
+            return false;
+        }
+    }
+
     _programState = desc.programState;
 
     auto* computePipeline = static_cast<ComputePipelineImpl*>(desc.pipeline);

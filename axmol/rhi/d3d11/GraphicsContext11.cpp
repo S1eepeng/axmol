@@ -656,6 +656,42 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     if (!program || !program->getCSModule())
         return false;
 
+    const auto& storageBindings = desc.programState->getStorageBufferBindingSets();
+    for (const auto& storageInfo : program->getActiveStorageBufferInfos())
+    {
+        auto binding = storageBindings.find(storageInfo.binding);
+        if (binding == storageBindings.end() || !binding->second.buffer)
+        {
+            AXLOGE("Missing D3D11 compute storage buffer binding {} ({})", storageInfo.binding, storageInfo.name);
+            AXASSERT(false, "Missing D3D11 compute storage buffer binding");
+            return false;
+        }
+        if (binding->second.access != storageInfo.access)
+        {
+            AXLOGE("D3D11 compute storage buffer binding {} has incompatible access", storageInfo.binding);
+            AXASSERT(false, "D3D11 compute storage buffer access mismatch");
+            return false;
+        }
+
+        auto bufferImpl = static_cast<BufferImpl*>(binding->second.buffer);
+        if ((storageInfo.sizeBytes != 0 && bufferImpl->getSize() < storageInfo.sizeBytes) ||
+            (storageInfo.arrayStride != 0 && bufferImpl->getStride() != storageInfo.arrayStride))
+        {
+            AXLOGE("D3D11 compute storage buffer binding {} does not match reflected size/stride", storageInfo.binding);
+            AXASSERT(false, "D3D11 compute storage buffer layout mismatch");
+            return false;
+        }
+
+        const bool hasView = storageInfo.access == BufferAccess::READ_WRITE ? bufferImpl->getUAV() != nullptr
+                                                                            : bufferImpl->getSRV() != nullptr;
+        if (!hasView)
+        {
+            AXLOGE("D3D11 compute storage buffer binding {} has no native view", storageInfo.binding);
+            AXASSERT(false, "D3D11 compute storage buffer has no native view");
+            return false;
+        }
+    }
+
     auto context = _d3d11Context;
     _programState = desc.programState;
 
@@ -730,16 +766,18 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     context->Dispatch(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
 
     // Unbind CS resources to avoid D3D11 SRV/UAV conflicts with later draws.
+    ID3D11UnorderedAccessView* nullUAV = nullptr;
+    ID3D11ShaderResourceView* nullSRV  = nullptr;
     for (UINT slot : boundUAVs)
-        context->CSSetUnorderedAccessViews(slot, 1, nullptr, nullptr);
+        context->CSSetUnorderedAccessViews(slot, 1, &nullUAV, nullptr);
     for (UINT slot : boundSRVs)
-        context->CSSetShaderResources(slot, 1, nullptr);
+        context->CSSetShaderResources(slot, 1, &nullSRV);
     for (const auto& [bindingIndex, bindingSet] : desc.programState->getTextureBindingSets())
     {
         for (size_t k = 0; k < bindingSet.texs.size(); ++k)
         {
             const UINT slot = static_cast<UINT>(bindingIndex + k);
-            context->CSSetShaderResources(slot, 1, nullptr);
+            context->CSSetShaderResources(slot, 1, &nullSRV);
         }
     }
 

@@ -94,6 +94,10 @@ public:
         SetModelLoader(renderer->CreateModelLoader(_file));
         SetMaterialLoader(renderer->CreateMaterialLoader(_file));
         SetCurveLoader(Effekseer::MakeRefPtr<Effekseer::CurveLoader>(_file));
+        // GPU particle resources are created while Effect::Create parses the
+        // effect. The factory must therefore be installed on this setting,
+        // not only on the manager used later for simulation.
+        SetGpuParticleFactory(renderer->CreateGpuParticleFactory());
     }
 
 private:
@@ -480,7 +484,10 @@ bool EffectManager::initialize(ax::Size visibleSize)
     // Register the GPU particle system when the backend supports compute/storage/Texture3D.
     Effekseer::GpuParticleSystem::Settings gpuSettings;
     if (auto gpuSystem = _renderer->CreateGpuParticleSystem(gpuSettings))
+    {
         _manager->SetGpuParticleSystem(gpuSystem);
+        _manager->SetGpuParticleFactory(_renderer->CreateGpuParticleFactory());
+    }
 
     _renderer->SetProjectionMatrix(Effekseer::Matrix44().OrthographicRH(visibleSize.width, visibleSize.height, 1.0f, 400.0f));
     _renderer->SetCameraMatrix(Effekseer::Matrix44().LookAtRH(Effekseer::Vector3D(visibleSize.width / 2.0f, visibleSize.height / 2.0f, 200.0f),

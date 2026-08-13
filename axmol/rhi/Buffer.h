@@ -83,7 +83,7 @@ public:
     size_t getCapacity() const { return _capacity; }
 
     /**
-     * Get the element stride in bytes for structured buffers (0 for raw buffers).
+     * Get the logical storage element stride in bytes. Backends may expose storage through raw native views.
      * @return The element stride in bytes.
      */
     uint32_t getStride() const { return _stride; }
@@ -110,7 +110,7 @@ protected:
      * BufferType::INDEX.
      * @param usage Specifies the expected usage pattern of the data store. The symbolic constant must be
      * GL_STREAM_DRAW, GL_STATIC_DRAW, or GL_DYNAMIC_DRAW.
-     * @param stride Specifies the element stride in bytes for structured buffers (0 for raw buffers).
+     * @param stride Specifies the logical storage element stride in bytes (0 when unspecified).
      */
     Buffer(size_t size, BufferType type, BufferUsage usage, uint32_t stride = 0)
         : _usage(usage), _type(type), _size(size), _capacity(size), _stride(stride)
@@ -120,7 +120,7 @@ protected:
     BufferType _type   = BufferType::VERTEX;    ///< Buffer type.
     size_t _capacity   = 0;
     size_t _size       = 0;  ///< buffer size in bytes.
-    uint32_t _stride   = 0;  ///< element stride in bytes for structured buffers.
+    uint32_t _stride   = 0;  ///< logical storage element stride in bytes.
     uint64_t _lastFenceValue{0};
 };
 

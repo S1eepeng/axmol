@@ -88,6 +88,70 @@ ax::rhi::SamplerDesc ToSamplerDesc(Effekseer::TextureFilterType filter, Effeksee
     return samplerDesc;
 }
 
+ax::rhi::BlendOp ToBlendOp(Effekseer::Backend::BlendEquationType value)
+{
+    switch (value)
+    {
+    case Effekseer::Backend::BlendEquationType::Sub:
+        return ax::rhi::BlendOp::SUBTRACT;
+    case Effekseer::Backend::BlendEquationType::ReverseSub:
+        return ax::rhi::BlendOp::REVERSE_SUBTRACT;
+    case Effekseer::Backend::BlendEquationType::Add:
+    case Effekseer::Backend::BlendEquationType::Min:
+    case Effekseer::Backend::BlendEquationType::Max:
+    default:
+        return ax::rhi::BlendOp::ADD;
+    }
+}
+
+ax::rhi::BlendFactor ToBlendFactor(Effekseer::Backend::BlendFuncType value)
+{
+    switch (value)
+    {
+    case Effekseer::Backend::BlendFuncType::Zero:
+        return ax::rhi::BlendFactor::ZERO;
+    case Effekseer::Backend::BlendFuncType::One:
+        return ax::rhi::BlendFactor::ONE;
+    case Effekseer::Backend::BlendFuncType::SrcColor:
+        return ax::rhi::BlendFactor::SRC_COLOR;
+    case Effekseer::Backend::BlendFuncType::OneMinusSrcColor:
+        return ax::rhi::BlendFactor::ONE_MINUS_SRC_COLOR;
+    case Effekseer::Backend::BlendFuncType::SrcAlpha:
+        return ax::rhi::BlendFactor::SRC_ALPHA;
+    case Effekseer::Backend::BlendFuncType::OneMinusSrcAlpha:
+        return ax::rhi::BlendFactor::ONE_MINUS_SRC_ALPHA;
+    case Effekseer::Backend::BlendFuncType::DstAlpha:
+        return ax::rhi::BlendFactor::DST_ALPHA;
+    case Effekseer::Backend::BlendFuncType::OneMinusDstAlpha:
+        return ax::rhi::BlendFactor::ONE_MINUS_DST_ALPHA;
+    case Effekseer::Backend::BlendFuncType::DstColor:
+        return ax::rhi::BlendFactor::DST_COLOR;
+    case Effekseer::Backend::BlendFuncType::OneMinusDstColor:
+        return ax::rhi::BlendFactor::ONE_MINUS_DST_COLOR;
+    default:
+        return ax::rhi::BlendFactor::ONE;
+    }
+}
+
+ax::rhi::CompareFunc ToCompareFunc(Effekseer::Backend::DepthFuncType value)
+{
+    return static_cast<ax::rhi::CompareFunc>(value);
+}
+
+ax::rhi::CullMode ToCullMode(Effekseer::Backend::CullingType value)
+{
+    switch (value)
+    {
+    case Effekseer::Backend::CullingType::Clockwise:
+        return ax::rhi::CullMode::FRONT;
+    case Effekseer::Backend::CullingType::CounterClockwise:
+        return ax::rhi::CullMode::BACK;
+    case Effekseer::Backend::CullingType::DoubleSide:
+    default:
+        return ax::rhi::CullMode::NONE;
+    }
+}
+
 class VertexBufferAX : public Effekseer::Backend::VertexBuffer
 {
 public:
@@ -164,9 +228,13 @@ public:
     }
 
     ax::rhi::Buffer* get() const { return _buffer; }
+    Effekseer::Backend::IndexBufferStrideType getStrideType() const { return strideType_; }
+    int32_t getElementCount() const { return elementCount_; }
 
 private:
     ax::rhi::Buffer* _buffer = nullptr;
+    Effekseer::Backend::IndexBufferStrideType strideType_ = Effekseer::Backend::IndexBufferStrideType::Stride2;
+    int32_t elementCount_ = 0;
     size_t _strideSize = 2;
     std::vector<uint8_t> _shadow;
 };
@@ -282,14 +350,13 @@ class StorageBufferAX : public Effekseer::Backend::StorageBuffer
 {
 public:
     StorageBufferAX(ax::rhi::Buffer* buffer, int32_t elementCount, int32_t elementSize, const void* initialData)
-        : _buffer(buffer), _shadow(static_cast<size_t>(elementCount) * static_cast<size_t>(elementSize))
+        : _buffer(buffer), _size(static_cast<size_t>(elementCount) * static_cast<size_t>(elementSize)),
+          _shadow(initialData ? _size : 0)
     {
         if (_buffer)
             _buffer->retain();
         if (initialData && !_shadow.empty())
             memcpy(_shadow.data(), initialData, _shadow.size());
-        if (_buffer && !_shadow.empty())
-            _buffer->updateData(_shadow.data(), _shadow.size());
     }
 
     ~StorageBufferAX() override { AX_SAFE_RELEASE(_buffer); }
@@ -301,10 +368,11 @@ public:
 
         const auto dstOffset = static_cast<size_t>(offset);
         const auto dstSize = static_cast<size_t>(size);
-        if (dstOffset + dstSize > _shadow.size())
+        if (dstOffset + dstSize > _size)
             return false;
 
-        memcpy(_shadow.data() + dstOffset, src, dstSize);
+        if (!_shadow.empty())
+            memcpy(_shadow.data() + dstOffset, src, dstSize);
         _buffer->updateSubData(src, dstOffset, dstSize);
         return true;
     }
@@ -313,6 +381,7 @@ public:
 
 private:
     ax::rhi::Buffer* _buffer = nullptr;
+    size_t _size = 0;
     std::vector<uint8_t> _shadow;
 };
 
@@ -428,8 +497,10 @@ public:
         desc.size = static_cast<size_t>(elementCount) * static_cast<size_t>(elementSize);
         desc.stride = static_cast<uint32_t>(elementSize);
         desc.type = ax::rhi::BufferType::STORAGE;
-        desc.usage = usage == Effekseer::Backend::StorageBufferUsage::ReadOnly ? ax::rhi::BufferUsage::STATIC
-                                                                               : ax::rhi::BufferUsage::DYNAMIC;
+        // Effekseer particle/trail buffers persist across multiple dispatches
+        // and frames. BufferAccess controls SRV/UAV permissions; CPU usage must
+        // remain STATIC so Vulkan does not rotate per-frame backing buffers.
+        desc.usage = ax::rhi::BufferUsage::STATIC;
         desc.access = usage == Effekseer::Backend::StorageBufferUsage::ReadOnly ? ax::rhi::BufferAccess::READ_ONLY
                                                                                 : ax::rhi::BufferAccess::READ_WRITE;
 
@@ -558,8 +629,35 @@ public:
         auto pipeline = param.PipelineStatePtr.DownCast<PipelineStateAX>();
         if (!pipeline || !pipeline->programState)
             return;
-        auto ps = pipeline->programState;
+        auto vb = param.VertexBufferPtr.DownCast<VertexBufferAX>();
+        auto ib = param.IndexBufferPtr.DownCast<IndexBufferAX>();
+        if (!vb || !vb->get() || !ib || !ib->get())
+            return;
 
+        auto layoutRef = pipeline->param.VertexLayoutPtr.DownCast<VertexLayoutAX>();
+        auto layout    = layoutRef ? layoutRef->get() : nullptr;
+        if (!layout)
+            return;
+
+        const auto stride = static_cast<size_t>(param.VertexStride);
+        if (stride == 0 || vb->shadowSize() < stride || param.PrimitiveCount <= 0 || param.InstanceCount <= 0)
+            return;
+
+        // PrimitiveCount describes indexed triangles. It is not the number of
+        // vertices in the source model (a quad has 2 triangles and 4 vertices).
+        const auto vertexCount = vb->shadowSize() / stride;
+        const auto indexCount  = static_cast<size_t>(param.PrimitiveCount) * 3u;
+        if (indexCount > static_cast<size_t>(ib->getElementCount()))
+            return;
+
+        auto axRenderer = _renderer->getAxRenderer();
+        if (!axRenderer)
+            return;
+
+        // Commands are queued and may execute after Effekseer has prepared the
+        // next draw. Keep uniforms, textures, samplers and storage bindings
+        // independent for every queued GPU draw.
+        auto ps = pipeline->programState->clone();
         for (int i = 0; i < Effekseer::Backend::DrawParameter::BufferSlotCount; ++i)
         {
             auto ubv = param.VertexUniformBufferPtrs[i].DownCast<UniformBufferAX>();
@@ -571,25 +669,6 @@ public:
         }
 
         bindResources(ps, param.ResourceBinders, Effekseer::Backend::DrawParameter::ResourceSlotCount);
-
-        auto vb = param.VertexBufferPtr.DownCast<VertexBufferAX>();
-        auto ib = param.IndexBufferPtr.DownCast<IndexBufferAX>();
-        if (!vb || !vb->get() || !ib || !ib->get())
-            return;
-
-        auto layoutRef = pipeline->param.VertexLayoutPtr.DownCast<VertexLayoutAX>();
-        auto layout    = layoutRef ? layoutRef->get() : nullptr;
-        if (!layout)
-            return;
-
-        const auto stride       = static_cast<size_t>(param.VertexStride);
-        const auto vertexCount  = static_cast<size_t>(param.PrimitiveCount) * 3u;
-        if (vertexCount == 0 || param.InstanceCount <= 0)
-            return;
-
-        auto axRenderer = _renderer->getAxRenderer();
-        if (!axRenderer)
-            return;
 
         if (_commandIndex >= _commands.size())
         {
@@ -603,28 +682,58 @@ public:
 
         command->init(_globalZOrder);
         command->setOwnPSVL(ps, layout, ax::RenderCommand::ADOPT_FLAG_PS);
-        command->setDrawType(ax::CustomCommand::DrawType::ELEMENT);
+        command->setDrawType(ax::CustomCommand::DrawType::ELEMENT_INSTANCED);
         command->setPrimitiveType(ax::CustomCommand::PrimitiveType::TRIANGLE);
-        command->setTransparent(true);
+        command->setTransparent(pipeline->param.IsBlendEnabled);
 
-        const auto vertexBytes = vertexCount * stride;
+        const auto depthTest  = pipeline->param.IsDepthTestEnabled;
+        const auto depthWrite = pipeline->param.IsDepthWriteEnabled;
+        const auto depthFunc  = ToCompareFunc(pipeline->param.DepthFunc);
+        const auto cullMode   = ToCullMode(pipeline->param.Culling);
+        struct RenderStateBackup
+        {
+            bool depthTest = false;
+            bool depthWrite = false;
+            ax::rhi::CompareFunc depthFunc = ax::rhi::CompareFunc::LESS;
+            ax::rhi::CullMode cullMode = ax::rhi::CullMode::NONE;
+        };
+        auto stateBackup = std::make_shared<RenderStateBackup>();
+        command->setBeforeCallback([renderer = axRenderer, stateBackup, depthTest, depthWrite, depthFunc, cullMode]() {
+            stateBackup->depthTest  = renderer->getDepthTest();
+            stateBackup->depthWrite = renderer->getDepthWrite();
+            stateBackup->depthFunc  = renderer->getDepthCompareFunc();
+            stateBackup->cullMode   = renderer->getCullMode();
+            renderer->setDepthTest(depthTest);
+            renderer->setDepthWrite(depthWrite);
+            renderer->setDepthCompareFunc(depthFunc);
+            renderer->setCullMode(cullMode);
+        });
+        command->setAfterCallback([renderer = axRenderer, stateBackup]() {
+            renderer->setDepthTest(stateBackup->depthTest);
+            renderer->setDepthWrite(stateBackup->depthWrite);
+            renderer->setDepthCompareFunc(stateBackup->depthFunc);
+            renderer->setCullMode(stateBackup->cullMode);
+        });
+
         if (command->getVertexCapacity() < vertexCount || strideChanged)
             command->createVertexBuffer(stride, vertexCount, ax::CustomCommand::BufferUsage::DYNAMIC);
-        command->updateVertexBuffer(vb->shadowData(), vertexBytes);
+        command->updateVertexBuffer(vb->shadowData(), vb->shadowSize());
 
-        command->setIndexBuffer(ib->get(), ax::CustomCommand::IndexFormat::U_SHORT);
-        command->setIndexDrawInfo(0, static_cast<size_t>(param.PrimitiveCount) * 3u);
+        const auto indexFormat = ib->getStrideType() == Effekseer::Backend::IndexBufferStrideType::Stride2
+                                     ? ax::CustomCommand::IndexFormat::U_SHORT
+                                     : ax::CustomCommand::IndexFormat::U_INT;
+        command->setIndexBuffer(ib->get(), indexFormat);
+        command->setIndexDrawInfo(0, indexCount);
         command->setInstanceDrawInfo(param.InstanceCount);
 
-        // GPU particles always use additive-ish blending driven by the render state.
         auto& blendDesc = command->blendDesc();
-        blendDesc.blendEnabled = true;
-        blendDesc.rgbBlendOp   = ax::rhi::BlendOp::ADD;
-        blendDesc.alphaBlendOp = ax::rhi::BlendOp::ADD;
-        blendDesc.sourceRGBBlendFactor      = ax::rhi::BlendFactor::SRC_ALPHA;
-        blendDesc.destinationRGBBlendFactor = ax::rhi::BlendFactor::ONE_MINUS_SRC_ALPHA;
-        blendDesc.sourceAlphaBlendFactor    = ax::rhi::BlendFactor::ONE;
-        blendDesc.destinationAlphaBlendFactor = ax::rhi::BlendFactor::ONE_MINUS_SRC_ALPHA;
+        blendDesc.blendEnabled                 = pipeline->param.IsBlendEnabled;
+        blendDesc.rgbBlendOp                    = ToBlendOp(pipeline->param.BlendEquationRGB);
+        blendDesc.alphaBlendOp                  = ToBlendOp(pipeline->param.BlendEquationAlpha);
+        blendDesc.sourceRGBBlendFactor          = ToBlendFactor(pipeline->param.BlendSrcFunc);
+        blendDesc.destinationRGBBlendFactor     = ToBlendFactor(pipeline->param.BlendDstFunc);
+        blendDesc.sourceAlphaBlendFactor        = ToBlendFactor(pipeline->param.BlendSrcFuncAlpha);
+        blendDesc.destinationAlphaBlendFactor   = ToBlendFactor(pipeline->param.BlendDstFuncAlpha);
 
         axRenderer->addCommand(command);
     }
@@ -1353,6 +1462,24 @@ Effekseer::GpuParticleSystemRef Renderer::CreateGpuParticleSystem(const Effeksee
     if (!system->InitSystem(settings))
         return nullptr;
     return system;
+}
+
+Effekseer::GpuParticleFactoryRef Renderer::CreateGpuParticleFactory()
+{
+    auto device = ax::rhi::GraphicsCore::device();
+    if (!device)
+        return nullptr;
+
+    const auto& caps = device->getCaps();
+    const bool supported =
+        device->checkForFeatureSupported(ax::rhi::FeatureType::COMPUTE_SHADER) &&
+        device->checkForFeatureSupported(ax::rhi::FeatureType::STORAGE_BUFFER) &&
+        device->checkForFeatureSupported(ax::rhi::FeatureType::TEXTURE_3D) &&
+        caps.maxComputeWorkGroupSize[0] >= 256 && caps.maxStorageBufferBindings >= 2 && caps.maxTexture3DSize >= 8;
+    if (!supported)
+        return nullptr;
+
+    return Effekseer::MakeRefPtr<EffekseerRenderer::GpuParticleFactory>(_graphicsDevice);
 }
 
 Effekseer::TextureLoaderRef Renderer::CreateTextureLoader(Effekseer::FileInterfaceRef fileInterface)

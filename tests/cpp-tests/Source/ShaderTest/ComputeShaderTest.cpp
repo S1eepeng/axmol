@@ -42,6 +42,12 @@ ax::Data loadArchive(std::string_view name)
         return {};
     return fileUtils->getDataFromFile(fullPath);
 }
+
+bool failInitialization(std::string_view reason)
+{
+    AXLOGE("ComputeDispatchTest initialization failed: {}", reason);
+    return false;
+}
 }  // namespace
 
 ComputeShaderTests::ComputeShaderTests()
@@ -73,22 +79,27 @@ bool ComputeDispatchTest::init()
     auto device = rhi::GraphicsCore::device();
     if (!device || !device->checkForFeatureSupported(rhi::FeatureType::COMPUTE_SHADER))
         return true;  // unsupported backend; render nothing
+    if (!device->checkForFeatureSupported(rhi::FeatureType::STORAGE_BUFFER))
+        return failInitialization("backend reports compute support without storage buffer support");
 
     // Compute program: writes a gradient into the storage buffer.
-    _computeProgram = device->createComputeProgram(loadArchive("custom/compute_dispatch_cs"));
+    auto computeArchive = loadArchive("custom/compute_dispatch_cs");
+    if (computeArchive.isNull())
+        return failInitialization("compute shader archive is missing");
+    _computeProgram = device->createComputeProgram(std::move(computeArchive));
     if (!_computeProgram || !_computeProgram->isValid())
-        return true;
+        return failInitialization("compute program creation failed");
     _computePipeline = device->createComputePipeline(_computeProgram);
     if (!_computePipeline)
-        return true;
+        return failInitialization("compute pipeline creation failed");
     _computeState = new rhi::ProgramState(_computeProgram);
     _computeState->setStorageBuffer(0, nullptr, rhi::BufferAccess::READ_WRITE);
 
     // Render program: vertex shader reads the storage buffer to color a quad.
     _renderProgram = ProgramManager::getInstance()->loadProgram("custom/compute_dispatch_vs",
                                                                 "custom/compute_dispatch_ps");
-    if (!_renderProgram)
-        return true;
+    if (!_renderProgram || !_renderProgram->isValid())
+        return failInitialization("render program creation failed");
     _renderState = new rhi::ProgramState(_renderProgram);
     _renderState->setStorageBuffer(0, nullptr, rhi::BufferAccess::READ_ONLY);
 
@@ -101,7 +112,7 @@ bool ComputeDispatchTest::init()
     storageDesc.access = rhi::BufferAccess::READ_WRITE;
     _storageBuffer     = device->createBuffer(storageDesc);
     if (!_storageBuffer)
-        return true;
+        return failInitialization("storage buffer creation failed");
 
     _computeState->setStorageBuffer(0, _storageBuffer, rhi::BufferAccess::READ_WRITE);
     _renderState->setStorageBuffer(0, _storageBuffer, rhi::BufferAccess::READ_ONLY);
@@ -114,9 +125,13 @@ bool ComputeDispatchTest::init()
         -1.0f,  1.0f, 0.0f, 12.0f,
     };
     _vertexBuffer = device->createBuffer(sizeof(verts), rhi::BufferType::VERTEX, rhi::BufferUsage::STATIC, verts);
+    if (!_vertexBuffer)
+        return failInitialization("vertex buffer creation failed");
 
     const unsigned short indices[] = {0, 1, 2, 0, 2, 3};
     _indexBuffer = device->createBuffer(sizeof(indices), rhi::BufferType::INDEX, rhi::BufferUsage::STATIC, indices);
+    if (!_indexBuffer)
+        return failInitialization("index buffer creation failed");
 
     rhi::VertexLayoutDesc layoutDesc;
     layoutDesc.startLayout(2);
@@ -126,11 +141,13 @@ bool ComputeDispatchTest::init()
     auto posDesc = _renderProgram->getVertexInputDesc(rhi::VertexSemantic::POSITION);
     auto idDesc  = _renderProgram->getVertexInputDesc(rhi::VertexSemantic::TEXCOORD0);
     if (!posDesc || !idDesc)
-        return true;
+        return failInitialization("render program vertex reflection is incomplete");
     layoutDesc.addAttrib(posDesc, rhi::VertexElementType::FLOAT3, 0, false);
     layoutDesc.addAttrib(idDesc, rhi::VertexElementType::FLOAT, 12, false);
     layoutDesc.endLayout(16);
     _vertexLayout = device->createVertexLayout(std::move(layoutDesc));
+    if (!_vertexLayout)
+        return failInitialization("vertex layout creation failed");
 
     return true;
 }
@@ -145,17 +162,17 @@ void ComputeDispatchTest::visit(const ax::SceneRenderState& state, const ax::Mat
     auto renderer = state.getRenderer();
     if (renderer && _computeState && _storageBuffer && _renderState && _vertexLayout)
     {
-        dispatchCompute(renderer);
-        setupDrawCommand(renderer);
+        if (dispatchCompute(renderer))
+            setupDrawCommand(renderer);
     }
     TestCase::visit(state, parentTransform, parentFlags);
 }
 
-void ComputeDispatchTest::dispatchCompute(ax::Renderer* renderer)
+bool ComputeDispatchTest::dispatchCompute(ax::Renderer* renderer)
 {
     auto context = renderer->getContext();
     if (!context)
-        return;
+        return false;
 
     rhi::ComputeDispatchDesc desc;
     desc.pipeline     = _computePipeline;
@@ -164,7 +181,11 @@ void ComputeDispatchTest::dispatchCompute(ax::Renderer* renderer)
     desc.groupCountY  = 1;
     desc.groupCountZ  = 1;
 
-    AXASSERT(context->dispatch(desc), "Compute dispatch failed");
+    const bool dispatched = context->dispatch(desc);
+    AXASSERT(dispatched, "Compute dispatch failed");
+    if (!dispatched)
+        AXLOGE("ComputeDispatchTest dispatch failed");
+    return dispatched;
 }
 
 void ComputeDispatchTest::setupDrawCommand(ax::Renderer* renderer)
@@ -184,14 +205,7 @@ void ComputeDispatchTest::setupDrawCommand(ax::Renderer* renderer)
     _drawCommand.setDrawType(ax::CustomCommand::DrawType::ELEMENT);
     _drawCommand.setPrimitiveType(ax::CustomCommand::PrimitiveType::TRIANGLE);
     _drawCommand.setTransparent(false);
-    _drawCommand.createVertexBuffer(16, 4, ax::CustomCommand::BufferUsage::DYNAMIC);
-    const float verts[] = {
-        -1.0f, -1.0f, 0.0f, 0.0f,
-         1.0f, -1.0f, 0.0f, 4.0f,
-         1.0f,  1.0f, 0.0f, 8.0f,
-        -1.0f,  1.0f, 0.0f, 12.0f,
-    };
-    _drawCommand.updateVertexBuffer(verts, sizeof(verts));
+    _drawCommand.setVertexBuffer(_vertexBuffer);
     _drawCommand.setIndexBuffer(_indexBuffer, ax::CustomCommand::IndexFormat::U_SHORT);
     _drawCommand.setIndexDrawInfo(0, 6);
 
