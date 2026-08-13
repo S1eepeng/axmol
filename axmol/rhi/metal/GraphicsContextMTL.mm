@@ -333,9 +333,18 @@ void GraphicsContextImpl::setInstanceBuffer(Buffer* buffer)
 {
     // Vertex instancing transform buffer is bound in index VBO_INSTANCING_BINDING_INDEX.
     // TODO: sync device binding macros to AXSLCC
-    [_mtlRenderEncoder setVertexBuffer:static_cast<BufferImpl*>(buffer)->getMTLBuffer()
-                                offset:0
-                               atIndex:GraphicsDeviceImpl::VBO_INSTANCING_BINDING_INDEX];
+    if (buffer)
+    {
+        [_mtlRenderEncoder setVertexBuffer:static_cast<BufferImpl*>(buffer)->getMTLBuffer()
+                                    offset:0
+                                   atIndex:GraphicsDeviceImpl::VBO_INSTANCING_BINDING_INDEX];
+    }
+    else
+    {
+        [_mtlRenderEncoder setVertexBuffer:nil
+                                    offset:0
+                                   atIndex:GraphicsDeviceImpl::VBO_INSTANCING_BINDING_INDEX];
+    }
 }
 
 void GraphicsContextImpl::setIndexBuffer(Buffer* buffer)

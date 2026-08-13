@@ -977,7 +977,12 @@ void GraphicsContextImpl::setIndexBuffer(Buffer* buffer)
 
 void GraphicsContextImpl::setInstanceBuffer(Buffer* buffer)
 {
-    if (!buffer || _instanceBuffer == buffer)
+    if (!buffer)
+    {
+        AX_SAFE_RELEASE_NULL(_instanceBuffer);
+        return;
+    }
+    if (_instanceBuffer == buffer)
         return;
     buffer->retain();
     AX_SAFE_RELEASE(_instanceBuffer);

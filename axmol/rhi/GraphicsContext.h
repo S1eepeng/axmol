@@ -166,7 +166,9 @@ public:
 
     /**
      * Set matrix tranform when drawing instances of the same model
-     * @ buffer A buffer object that the device will read matrices from.
+     * @ buffer A buffer object that the device will read matrices from. It may
+     * be null when the shader uses the instance ID and has no per-instance
+     * vertex attributes.
      */
     virtual void setInstanceBuffer(Buffer* buffer) = 0;
 
@@ -266,6 +268,19 @@ public:
      */
     virtual bool copyTexture(RenderTarget* src, Texture* dst) = 0;
 
+    /**
+     * @brief Dispatches a compute pipeline on the graphics queue.
+     *
+     * The pipeline and program state must reference the same compute program.
+     * All resources declared by that program must be bound through the
+     * program state before dispatch. The dispatch is submitted outside an
+     * active render pass; the RHI performs the required synchronization with
+     * subsequent compute and graphics accesses.
+     *
+     * @param desc Compute pipeline, resource bindings, and workgroup counts.
+     * @return true if the dispatch was accepted; otherwise false when compute
+     *         is unsupported or the descriptor is invalid.
+     */
     virtual bool dispatch(const ComputeDispatchDesc& desc);
 
     /**

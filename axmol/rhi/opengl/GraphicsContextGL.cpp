@@ -220,8 +220,12 @@ void GraphicsContextImpl::setIndexBuffer(Buffer* buffer)
 
 void GraphicsContextImpl::setInstanceBuffer(Buffer* buffer)
 {
-    assert(buffer != nullptr);
-    if (buffer == nullptr || _instanceBuffer == buffer)
+    if (buffer == nullptr)
+    {
+        AX_SAFE_RELEASE_NULL(_instanceBuffer);
+        return;
+    }
+    if (_instanceBuffer == buffer)
         return;
 
     buffer->retain();
