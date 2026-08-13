@@ -26,6 +26,14 @@
 #include "axmol/rhi/ComputePipeline.h"
 #include "axmol/rhi/d3d12/DescriptorHeapAllocator12.h"
 #include <d3d12.h>
+#include <map>
+#include <unordered_map>
+#include <vector>
+
+namespace ax::rhi
+{
+class ProgramState;
+}
 
 namespace ax::rhi::d3d12
 {
@@ -56,8 +64,12 @@ public:
     UINT uavRootIndex() const { return _uavRootIndex; }
     UINT samplerRootIndex() const { return _samplerRootIndex; }
     UINT customSamplerRootIndex() const { return _customSamplerRootIndex; }
-    const DescriptorHandle* customSamplerBatch() const { return _customSamplerBatch; }
-    uint32_t customSamplerBatchCount() const { return _customSamplerBatchCount; }
+    UINT cbvRootIndex(int binding) const
+    {
+        auto it = _cbvRootIndices.find(binding);
+        return it != _cbvRootIndices.end() ? it->second : UINT_MAX;
+    }
+    const DescriptorHandle* getCustomSamplerBatch(const ::ax::rhi::ProgramState* programState);
 
 private:
     void createRootSignature(ProgramImpl* program);
@@ -71,9 +83,10 @@ private:
     UINT _uavRootIndex           = UINT_MAX;
     UINT _samplerRootIndex       = UINT_MAX;
     UINT _customSamplerRootIndex = UINT_MAX;
+    std::unordered_map<int, UINT> _cbvRootIndices;
 
-    DescriptorHandle* _customSamplerBatch{nullptr};
     uint32_t _customSamplerBatchCount = 0;
+    std::map<std::vector<uint16_t>, DescriptorHandle*> _customSamplerBatches;
 };
 
 }  // namespace ax::rhi::d3d12

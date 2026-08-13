@@ -407,6 +407,23 @@ void BufferImpl::updateSubData(const void* data, size_t offset, size_t size)
         copyRegion.dstOffset = offset;
         copyRegion.size      = size;
         vkCmdCopyBuffer(submission.cmd, stagingBuffer, _buffer, 1, &copyRegion);
+
+        if (_type == BufferType::STORAGE)
+        {
+            VkBufferMemoryBarrier barrier{};
+            barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            barrier.srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.buffer              = _buffer;
+            barrier.offset              = 0;
+            barrier.size                = VK_WHOLE_SIZE;
+            vkCmdPipelineBarrier(submission.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                 0, 0, nullptr, 1, &barrier, 0, nullptr);
+        }
         _driver->finishIsolateSubmission(submission);
 
         // Destroy staging buffer using VMA

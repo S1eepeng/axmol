@@ -269,8 +269,9 @@ void TextureImpl::ensureNativeTexture()
                                                                          width:_desc.width
                                                                         height:_desc.height
                                                                          depth:_desc.depth
-                                                                      mipmapped:needMipmaps
-                                                                        levels:_desc.mipLevels ? _desc.mipLevels : 1];
+                                                                      mipmapped:needMipmaps];
+        if (_desc.mipLevels > 1)
+            textureDesc.mipmapLevelCount = _desc.mipLevels;
         break;
     default:
         return;

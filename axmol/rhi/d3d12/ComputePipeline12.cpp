@@ -24,6 +24,7 @@
 #include "axmol/rhi/d3d12/ComputePipeline12.h"
 #include "axmol/rhi/d3d12/GraphicsDevice12.h"
 #include "axmol/rhi/d3d12/Program12.h"
+#include "axmol/rhi/ProgramState.h"
 #include "axmol/rhi/SamplerRegistry.h"
 #include "axmol/base/Logging.h"
 
@@ -39,8 +40,8 @@ ComputePipelineImpl::ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl
 
 ComputePipelineImpl::~ComputePipelineImpl()
 {
-    if (_customSamplerBatch)
-        _driver->getSamplerAllocator()->deallocateBatch(_customSamplerBatch, _customSamplerBatchCount);
+    for (auto& [_, batch] : _customSamplerBatches)
+        _driver->getSamplerAllocator()->deallocateBatch(batch, _customSamplerBatchCount);
 }
 
 void ComputePipelineImpl::createRootSignature(ProgramImpl* program)
@@ -57,12 +58,15 @@ void ComputePipelineImpl::createRootSignature(ProgramImpl* program)
         param.Descriptor.ShaderRegister = uboInfo.binding;
         param.Descriptor.RegisterSpace  = 0;
         param.ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+        _cbvRootIndices.emplace(uboInfo.binding, rootIndex);
         ++rootIndex;
     }
 
     // Storage buffers and textures share the unified logical slot sequence (space 1).
     tlx::pod_vector<D3D12_DESCRIPTOR_RANGE> srvRanges;
     tlx::pod_vector<D3D12_DESCRIPTOR_RANGE> uavRanges;
+    tlx::pod_vector<D3D12_DESCRIPTOR_RANGE> customSamplerRanges;
+    D3D12_DESCRIPTOR_RANGE samplerRange{};
 
     for (auto& sb : program->getActiveStorageBufferInfos())
     {
@@ -89,7 +93,6 @@ void ComputePipelineImpl::createRootSignature(ProgramImpl* program)
     const auto& textures = program->getActiveTextureInfos();
     if (!textures.empty())
     {
-        D3D12_DESCRIPTOR_RANGE samplerRange{};
         samplerRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
         samplerRange.BaseShaderRegister                = 0;
         samplerRange.RegisterSpace                     = 1;
@@ -122,17 +125,23 @@ void ComputePipelineImpl::createRootSignature(ProgramImpl* program)
 
         if (customSamplerCount > 0)
         {
-            D3D12_DESCRIPTOR_RANGE customRange{};
-            customRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
-            customRange.NumDescriptors                    = customSamplerCount;
-            customRange.BaseShaderRegister                = 0;
-            customRange.RegisterSpace                     = 2;
-            customRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+            customSamplerRanges.reserve(program->getActiveSamplerInfos().size());
+            for (const auto& sampler : program->getActiveSamplerInfos())
+            {
+                if (sampler.presetIndex >= 0)
+                    continue;
+                auto& range                              = customSamplerRanges.emplace_back();
+                range.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+                range.NumDescriptors                    = sampler.count;
+                range.BaseShaderRegister                = sampler.binding;
+                range.RegisterSpace                     = 2;
+                range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+            }
 
             D3D12_ROOT_PARAMETER& customParam               = rootParams.emplace_back();
             customParam.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-            customParam.DescriptorTable.NumDescriptorRanges = 1;
-            customParam.DescriptorTable.pDescriptorRanges   = &customRange;
+            customParam.DescriptorTable.NumDescriptorRanges = static_cast<UINT>(customSamplerRanges.size());
+            customParam.DescriptorTable.pDescriptorRanges   = customSamplerRanges.data();
             customParam.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_ALL;
             _customSamplerRootIndex                         = rootIndex++;
         }
@@ -172,39 +181,56 @@ void ComputePipelineImpl::createRootSignature(ProgramImpl* program)
                                                    IID_PPV_ARGS(&_rootSig));
     AXASSERT(SUCCEEDED(hr), "Failed to create compute root signature");
 
-    // Custom sampler descriptor batch.
     uint32_t customSamplerCount = 0;
     for (const auto& smp : program->getActiveSamplerInfos())
     {
         if (smp.presetIndex < 0)
             customSamplerCount += smp.count;
     }
-    if (customSamplerCount > 0)
+    _customSamplerBatchCount = customSamplerCount;
+}
+
+const DescriptorHandle* ComputePipelineImpl::getCustomSamplerBatch(const ::ax::rhi::ProgramState* programState)
+{
+    if (!programState || _customSamplerBatchCount == 0)
+        return nullptr;
+
+    std::vector<uint16_t> key;
+    key.reserve(_customSamplerBatchCount);
+    for (const auto& sampler : programState->getProgram()->getActiveSamplerInfos())
     {
-        auto samplerAlloc = _driver->getSamplerAllocator();
-        auto batchHandle  = samplerAlloc->allocateBatch(customSamplerCount);
-        if (batchHandle)
-        {
-            auto device           = _driver->getDevice();
-            auto descriptorStride = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
-            auto samplerReg       = SamplerRegistry::getInstance();
-
-            uint32_t slot = 0;
-            for (const auto& smp : program->getActiveSamplerInfos())
-            {
-                if (smp.presetIndex >= 0 || !smp.samplerId)
-                    continue;
-
-                D3D12_CPU_DESCRIPTOR_HANDLE dstCpu = batchHandle->cpu;
-                dstCpu.ptr += static_cast<SIZE_T>(slot) * static_cast<SIZE_T>(descriptorStride);
-                _driver->writeSamplerDescriptor(samplerReg->getSamplerDesc(smp.samplerId), dstCpu);
-                ++slot;
-            }
-
-            _customSamplerBatch      = batchHandle;
-            _customSamplerBatchCount = customSamplerCount;
-        }
+        if (sampler.presetIndex >= 0)
+            continue;
+        auto samplerId = programState->getSamplerOverride(sampler.binding);
+        if (!samplerId)
+            samplerId = sampler.samplerId;
+        if (!samplerId)
+            return nullptr;
+        for (uint16_t i = 0; i < sampler.count; ++i)
+            key.push_back(samplerId.value);
     }
+    AXASSERT(key.size() == _customSamplerBatchCount, "D3D12 compute custom sampler descriptor count mismatch");
+    if (key.size() != _customSamplerBatchCount)
+        return nullptr;
+
+    if (auto it = _customSamplerBatches.find(key); it != _customSamplerBatches.end())
+        return it->second;
+
+    auto* batch = _driver->getSamplerAllocator()->allocateBatch(_customSamplerBatchCount);
+    if (!batch)
+        return nullptr;
+
+    const auto descriptorStride = _driver->getSamplerDescriptorStride();
+    auto* registry              = SamplerRegistry::getInstance();
+    for (size_t i = 0; i < key.size(); ++i)
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE dst = batch->cpu;
+        dst.ptr += static_cast<SIZE_T>(i) * static_cast<SIZE_T>(descriptorStride);
+        _driver->writeSamplerDescriptor(registry->getSamplerDesc(SamplerId{key[i]}), dst);
+    }
+
+    _customSamplerBatches.emplace(std::move(key), batch);
+    return batch;
 }
 
 void ComputePipelineImpl::createPipeline(ProgramImpl* program)

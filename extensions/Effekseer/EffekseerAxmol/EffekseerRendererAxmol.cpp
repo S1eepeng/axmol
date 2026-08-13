@@ -4,6 +4,7 @@
 #include "axmol/rhi/GraphicsCore.h"
 #include "axmol/rhi/ComputePipeline.h"
 #include "axmol/rhi/RenderTarget.h"
+#include "axmol/rhi/SamplerRegistry.h"
 #include "axmol/rhi/VertexLayout.h"
 #include "axmol/rhi/ShaderCache.h"
 #include "axmol/platform/Image.h"
@@ -20,6 +21,9 @@
 #include <EffekseerRendererCommon/EffekseerRenderer.StandardRenderer.h>
 #include <EffekseerRendererCommon/EffekseerRenderer.TrackRendererBase.h>
 #include <EffekseerRendererCommon/EffekseerRenderer.GpuParticles.h>
+#include <algorithm>
+#include <cstddef>
+#include <limits>
 #include <unordered_map>
 #include <memory>
 #include <EffekseerRendererCommon/ModelLoader.h>
@@ -73,20 +77,77 @@ ax::rhi::SamplerDesc ToSamplerDesc(Effekseer::TextureFilterType filter, Effeksee
     case Effekseer::TextureWrapType::Repeat:
         samplerDesc.sAddressMode = ax::rhi::SamplerAddressMode::REPEAT;
         samplerDesc.tAddressMode = ax::rhi::SamplerAddressMode::REPEAT;
+        samplerDesc.wAddressMode = ax::rhi::SamplerAddressMode::REPEAT;
         break;
     case Effekseer::TextureWrapType::Mirror:
         samplerDesc.sAddressMode = ax::rhi::SamplerAddressMode::MIRROR;
         samplerDesc.tAddressMode = ax::rhi::SamplerAddressMode::MIRROR;
+        samplerDesc.wAddressMode = ax::rhi::SamplerAddressMode::MIRROR;
         break;
     case Effekseer::TextureWrapType::Clamp:
     default:
         samplerDesc.sAddressMode = ax::rhi::SamplerAddressMode::CLAMP;
         samplerDesc.tAddressMode = ax::rhi::SamplerAddressMode::CLAMP;
+        samplerDesc.wAddressMode = ax::rhi::SamplerAddressMode::CLAMP;
         break;
     }
 
     return samplerDesc;
 }
+
+bool RegisterGpuParticleSamplers()
+{
+    auto* registry = ax::rhi::SamplerRegistry::getInstance();
+    const ax::rhi::SamplerDesc defaultSampler{};
+    for (const auto* name : {"NoiseSamp", "FieldSamp", "GradientSamp", "ColorSamp", "NormalSamp"})
+    {
+        if (!registry->registerSampler(name, defaultSampler))
+            return false;
+    }
+    return true;
+}
+
+bool SupportsGpuParticleFeatures(ax::rhi::GraphicsDevice* device)
+{
+    if (!device)
+        return false;
+
+    const auto& caps = device->getCaps();
+    return device->checkForFeatureSupported(ax::rhi::FeatureType::COMPUTE_SHADER) &&
+           device->checkForFeatureSupported(ax::rhi::FeatureType::STORAGE_BUFFER) &&
+           device->checkForFeatureSupported(ax::rhi::FeatureType::TEXTURE_3D) &&
+           caps.maxComputeWorkGroupSize[0] >= 256 && caps.maxComputeWorkGroupInvocations >= 256 &&
+           caps.maxComputeWorkGroupCount[0] > 0 && caps.maxStorageBufferBindings >= 2 &&
+           caps.maxTexture3DSize >= 8;
+}
+
+bool SupportsGpuParticleSettings(ax::rhi::GraphicsDevice* device,
+                                 const Effekseer::GpuParticleSystem::Settings& settings)
+{
+    if (!SupportsGpuParticleFeatures(device))
+        return false;
+
+    const auto& caps = device->getCaps();
+    const auto particleBytes =
+        static_cast<size_t>(settings.ParticleMaxCount) * sizeof(EffekseerRenderer::GpuParticles::ParticleData);
+    const auto trailBytes =
+        static_cast<size_t>(settings.TrailMaxCount) * sizeof(EffekseerRenderer::GpuParticles::TrailData);
+    const auto maxDispatchX = (static_cast<size_t>(settings.ParticleMaxCount) + 255u) / 256u;
+    return caps.maxStorageBufferSize >= (std::max)(particleBytes, trailBytes) &&
+           static_cast<size_t>(caps.maxComputeWorkGroupCount[0]) >= maxDispatchX;
+}
+
+// These structures are shared verbatim with the migrated HLSL. Fail at build
+// time if an Effekseer update changes the C++ ABI without updating the shaders.
+static_assert(sizeof(EffekseerRenderer::GpuParticles::ParameterData) == 368);
+static_assert(sizeof(EffekseerRenderer::GpuParticles::EmitterData) == 112);
+static_assert(sizeof(EffekseerRenderer::GpuParticles::ParticleData) == 80);
+static_assert(sizeof(EffekseerRenderer::GpuParticles::TrailData) == 16);
+static_assert(sizeof(EffekseerRenderer::GpuParticles::EmitPoint) == 32);
+static_assert(sizeof(EffekseerRenderer::GpuParticles::ComputeConstants) == 16);
+static_assert(sizeof(EffekseerRenderer::GpuParticles::RenderConstants) == 304);
+static_assert(offsetof(EffekseerRenderer::GpuParticles::EmitterData, Transform) == 64);
+static_assert(offsetof(EffekseerRenderer::GpuParticles::ParticleData, Transform) == 32);
 
 ax::rhi::BlendOp ToBlendOp(Effekseer::Backend::BlendEquationType value)
 {
@@ -247,8 +308,10 @@ public:
         if (_texture)
             _texture->retain();
         param_.Format = Effekseer::Backend::TextureFormatType::R8G8B8A8_UNORM;
-        param_.Dimension = 2;
-        param_.Size = {_texture ? _texture->getWidth() : 1, _texture ? _texture->getHeight() : 1, 1};
+        param_.Dimension = _texture && _texture->getTextureType() == ax::rhi::TextureType::TEXTURE_3D ? 3 : 2;
+        param_.Size = {_texture ? _texture->getWidth() : 1, _texture ? _texture->getHeight() : 1,
+                       _texture ? _texture->getDepth() : 1};
+        param_.MipLevelCount = _texture ? _texture->getMipLevels() : 1;
     }
 
     ~TextureAX() override { AX_SAFE_RELEASE(_texture); }
@@ -282,11 +345,6 @@ public:
         size_t offset = 0;
         for (const auto& el : _elements)
         {
-            auto inputDesc = program->getVertexInputDesc(
-                ax::rhi::VertexSemantic{el.SemanticName.c_str(), static_cast<uint16_t>(el.SemanticIndex)});
-            if (!inputDesc)
-                continue;
-
             ax::rhi::VertexElementType elementType = ax::rhi::VertexElementType::FLOAT3;
             bool needNormalize                      = false;
             uint32_t elementSize                    = 12;
@@ -318,6 +376,11 @@ public:
                 elementSize = 4;
                 break;
             }
+
+            auto inputDesc = program->getVertexInputDesc(
+                ax::rhi::VertexSemantic{el.SemanticName.c_str(), static_cast<uint16_t>(el.SemanticIndex)});
+            if (!inputDesc)
+                return;
             desc.addAttrib(inputDesc, elementType, offset, needNormalize);
             offset += elementSize;
         }
@@ -427,9 +490,13 @@ class GraphicsDevice : public Effekseer::Backend::GraphicsDevice
 public:
     Effekseer::Backend::VertexBufferRef CreateVertexBuffer(int32_t size, const void* initialData, bool isDynamic) override
     {
+        if (size <= 0)
+            return nullptr;
         auto buffer = ax::rhi::GraphicsCore::device()->createBuffer(
             static_cast<size_t>(size), ax::rhi::BufferType::VERTEX,
             isDynamic ? ax::rhi::BufferUsage::DYNAMIC : ax::rhi::BufferUsage::STATIC, initialData);
+        if (!buffer)
+            return nullptr;
         auto ret = Effekseer::MakeRefPtr<VertexBufferAX>(buffer, size, initialData);
         AX_SAFE_RELEASE(buffer);
         return ret;
@@ -437,9 +504,13 @@ public:
 
     Effekseer::Backend::IndexBufferRef CreateIndexBuffer(int32_t elementCount, const void* initialData, Effekseer::Backend::IndexBufferStrideType stride) override
     {
+        if (elementCount <= 0)
+            return nullptr;
         const auto strideSize = stride == Effekseer::Backend::IndexBufferStrideType::Stride2 ? 2 : 4;
         auto buffer = ax::rhi::GraphicsCore::device()->createBuffer(
             static_cast<size_t>(elementCount * strideSize), ax::rhi::BufferType::INDEX, ax::rhi::BufferUsage::STATIC, initialData);
+        if (!buffer)
+            return nullptr;
         auto ret = Effekseer::MakeRefPtr<IndexBufferAX>(buffer, elementCount, stride, initialData);
         AX_SAFE_RELEASE(buffer);
         return ret;
@@ -471,6 +542,8 @@ public:
 
     Effekseer::Backend::UniformBufferRef CreateUniformBuffer(int32_t size, const void* initialData) override
     {
+        if (size <= 0)
+            return nullptr;
         return Effekseer::MakeRefPtr<UniformBufferAX>(size, initialData);
     }
 
@@ -479,8 +552,8 @@ public:
         auto ub = buffer.DownCast<UniformBufferAX>();
         if (ub == nullptr || data == nullptr || offset < 0 || size < 0)
             return false;
-        if (static_cast<size_t>(offset + size) > ub->data.size())
-            ub->data.resize(offset + size);
+        if (static_cast<size_t>(offset) + static_cast<size_t>(size) > ub->data.size())
+            return false;
         memcpy(ub->data.data() + offset, data, size);
         return true;
     }
@@ -505,6 +578,8 @@ public:
                                                                                 : ax::rhi::BufferAccess::READ_WRITE;
 
         auto buffer = ax::rhi::GraphicsCore::device()->createBuffer(desc, initialData);
+        if (!buffer)
+            return nullptr;
         auto ret = Effekseer::MakeRefPtr<StorageBufferAX>(buffer, elementCount, elementSize, initialData);
         AX_SAFE_RELEASE(buffer);
         return ret;
@@ -518,18 +593,33 @@ public:
 
     Effekseer::Backend::PipelineStateRef CreatePipelineState(const Effekseer::Backend::PipelineStateParameter& param) override
     {
+        auto shader = param.ShaderPtr.DownCast<ShaderAX>();
+        if (!shader || !shader->getProgram() || !shader->getProgram()->isValid())
+            return nullptr;
+
         auto state = Effekseer::MakeRefPtr<PipelineStateAX>();
         state->param = param;
+        state->programState = new ax::rhi::ProgramState(shader->getProgram());
 
-        auto shader = param.ShaderPtr.DownCast<ShaderAX>();
-        if (shader && shader->getProgram())
+        if (shader->getProgram()->getCSModule())
         {
-            state->programState = new ax::rhi::ProgramState(shader->getProgram());
+            state->computePipeline =
+                ax::rhi::GraphicsCore::device()->createComputePipeline(shader->getProgram());
+            if (!state->computePipeline || !state->computePipeline->isValid())
+            {
+                AX_SAFE_RELEASE(state->computePipeline);
+                return nullptr;
+            }
+        }
 
-            // Build the graphics vertex layout from the program reflection.
-            auto layout = param.VertexLayoutPtr.DownCast<VertexLayoutAX>();
-            if (layout)
-                layout->buildLayout(shader->getProgram());
+        // Compute pipelines do not have a vertex layout. Graphics pipelines do,
+        // and an unusable reflected layout must fail system initialization.
+        auto layout = param.VertexLayoutPtr.DownCast<VertexLayoutAX>();
+        if (layout)
+        {
+            layout->buildLayout(shader->getProgram());
+            if (!layout->get())
+                return nullptr;
         }
         return state;
     }
@@ -537,9 +627,20 @@ public:
     Effekseer::Backend::TextureRef CreateTexture(const Effekseer::Backend::TextureParameter& param,
                                                  const Effekseer::CustomVector<uint8_t>& initialData) override
     {
+        if (param.Format != Effekseer::Backend::TextureFormatType::R8G8B8A8_UNORM ||
+            (param.Dimension != 2 && param.Dimension != 3) || param.Size[0] <= 0 || param.Size[1] <= 0 ||
+            param.Size[0] > std::numeric_limits<uint16_t>::max() ||
+            param.Size[1] > std::numeric_limits<uint16_t>::max() ||
+            (param.Dimension == 3 &&
+             (param.Size[2] <= 0 || param.Size[2] > std::numeric_limits<uint16_t>::max())))
+        {
+            return nullptr;
+        }
+
         ax::rhi::TextureDesc desc;
         desc.width  = static_cast<uint16_t>(param.Size[0]);
         desc.height = static_cast<uint16_t>(param.Size[1]);
+        desc.mipLevels = static_cast<uint16_t>((std::max)(param.MipLevelCount, 1));
         desc.pixelFormat = ax::rhi::PixelFormat::RGBA8;
         if (param.Dimension == 3)
         {
@@ -547,6 +648,8 @@ public:
             desc.depth       = static_cast<uint16_t>(param.Size[2]);
         }
         auto texture = ax::rhi::GraphicsCore::device()->createTexture(desc);
+        if (!texture)
+            return nullptr;
         if (texture && !initialData.empty())
         {
             if (param.Dimension == 3)
@@ -562,7 +665,7 @@ public:
     Effekseer::Backend::ShaderRef CreateShaderFromBinary(const void* vsCode, int32_t vsSize, const void* psCode, int32_t psSize) override
     {
         if (!vsCode || vsSize <= 0 || !psCode || psSize <= 0)
-            return Effekseer::MakeRefPtr<ShaderAX>();
+            return nullptr;
 
         ax::Data vsData;
         vsData.copy(static_cast<const uint8_t*>(vsCode), vsSize);
@@ -573,8 +676,27 @@ public:
         if (!program || !program->isValid())
         {
             AX_SAFE_RELEASE(program);
-            return Effekseer::MakeRefPtr<ShaderAX>();
+            return nullptr;
         }
+        auto ret = Effekseer::MakeRefPtr<ShaderAX>(program);
+        AX_SAFE_RELEASE(program);
+        return ret;
+    }
+
+    Effekseer::Backend::ShaderRef CreateComputeShader(const void* csCode, int32_t csSize) override
+    {
+        if (!csCode || csSize <= 0)
+            return nullptr;
+
+        ax::Data csData;
+        csData.copy(static_cast<const uint8_t*>(csCode), csSize);
+        auto program = ax::rhi::GraphicsCore::device()->createComputeProgram(std::move(csData));
+        if (!program || !program->isValid())
+        {
+            AX_SAFE_RELEASE(program);
+            return nullptr;
+        }
+
         auto ret = Effekseer::MakeRefPtr<ShaderAX>(program);
         AX_SAFE_RELEASE(program);
         return ret;
@@ -585,22 +707,71 @@ public:
         auto pipeline = command.PipelineStatePtr.DownCast<PipelineStateAX>();
         if (!pipeline || !pipeline->programState)
             return;
+        if (command.GroupCount[0] <= 0 || command.GroupCount[1] <= 0 || command.GroupCount[2] <= 0)
+            return;
 
         auto ps = pipeline->programState;
+        auto program = ps->getProgram();
+        if (!program)
+            return;
+
+        const auto& localSize = program->getComputeLocalSize();
+        for (size_t i = 0; i < localSize.size(); ++i)
+        {
+            if (command.ThreadCount[i] != localSize[i])
+            {
+                AXLOGE("Effekseer compute local size mismatch at dimension {}: command={}, shader={}", i,
+                       command.ThreadCount[i], localSize[i]);
+                return;
+            }
+        }
+
+        const auto* device = ax::rhi::GraphicsCore::device();
+        if (!device)
+            return;
+        const auto& caps = device->getCaps();
+        for (size_t i = 0; i < localSize.size(); ++i)
+        {
+            if (command.GroupCount[i] > caps.maxComputeWorkGroupCount[i] ||
+                command.ThreadCount[i] > caps.maxComputeWorkGroupSize[i])
+            {
+                AXLOGE("Effekseer compute dispatch exceeds device limits at dimension {}", i);
+                return;
+            }
+        }
+
+        static constexpr std::array<std::string_view, Effekseer::Backend::DispatchParameter::BufferSlotCount>
+            uniformBlockNames = {"cb0", "cb1", "cb2", "cb3"};
+        size_t boundUniformBlockCount = 0;
         for (int i = 0; i < Effekseer::Backend::DispatchParameter::BufferSlotCount; ++i)
         {
             auto ub = command.UniformBufferPtrs[i].DownCast<UniformBufferAX>();
             if (ub && !ub->data.empty())
-                ps->setUniformBlock(i, ub->data.data(), ub->data.size());
+                boundUniformBlockCount += ps->setUniformBlock(ax::rhi::ShaderStage::COMPUTE, uniformBlockNames[i],
+                                                               ub->data.data(), ub->data.size());
+        }
+        const auto activeUniformBlockCount = static_cast<size_t>(std::count_if(
+            ps->getActiveUniformBlockInfos().begin(), ps->getActiveUniformBlockInfos().end(),
+            [](const ax::rhi::UniformBlockInfo& block) { return block.stage == ax::rhi::ShaderStage::COMPUTE; }));
+        if (boundUniformBlockCount != activeUniformBlockCount)
+        {
+            AXLOGE("Failed to bind all Effekseer compute uniform blocks");
+            return;
         }
 
-        bindResources(ps, command.ResourceBinders, Effekseer::Backend::DispatchParameter::ResourceSlotCount);
+        if (!bindResources(ps, command.ResourceBinders,
+                           Effekseer::Backend::DispatchParameter::ResourceSlotCount))
+        {
+            AXLOGE("Failed to bind all Effekseer compute resources");
+            return;
+        }
 
         if (!pipeline->computePipeline && !pipeline->computePipelineFailed)
         {
             pipeline->computePipeline = ax::rhi::GraphicsCore::device()->createComputePipeline(ps->getProgram());
-            if (!pipeline->computePipeline)
+            if (!pipeline->computePipeline || !pipeline->computePipeline->isValid())
             {
+                AX_SAFE_RELEASE(pipeline->computePipeline);
                 pipeline->computePipelineFailed = true;
                 AXLOGE("Failed to create compute pipeline for Effekseer dispatch");
                 return;
@@ -617,8 +788,8 @@ public:
         desc.groupCountZ  = static_cast<uint32_t>(command.GroupCount[2]);
 
         auto context = _renderer && _renderer->getAxRenderer() ? _renderer->getAxRenderer()->getContext() : nullptr;
-        if (context)
-            context->dispatch(desc);
+        if (!context || !context->dispatch(desc))
+            AXLOGE("Failed to submit an Effekseer compute dispatch");
     }
 
     void Draw(const Effekseer::Backend::DrawParameter& param) override
@@ -640,14 +811,15 @@ public:
             return;
 
         const auto stride = static_cast<size_t>(param.VertexStride);
-        if (stride == 0 || vb->shadowSize() < stride || param.PrimitiveCount <= 0 || param.InstanceCount <= 0)
+        if (stride == 0 || vb->shadowSize() < stride || vb->shadowSize() % stride != 0 ||
+            param.PrimitiveCount <= 0 || param.InstanceCount <= 0 || param.IndexOffset < 0)
             return;
 
         // PrimitiveCount describes indexed triangles. It is not the number of
         // vertices in the source model (a quad has 2 triangles and 4 vertices).
-        const auto vertexCount = vb->shadowSize() / stride;
         const auto indexCount  = static_cast<size_t>(param.PrimitiveCount) * 3u;
-        if (indexCount > static_cast<size_t>(ib->getElementCount()))
+        const auto indexOffset = static_cast<size_t>(param.IndexOffset);
+        if (indexOffset + indexCount > static_cast<size_t>(ib->getElementCount()))
             return;
 
         auto axRenderer = _renderer->getAxRenderer();
@@ -658,26 +830,50 @@ public:
         // next draw. Keep uniforms, textures, samplers and storage bindings
         // independent for every queued GPU draw.
         auto ps = pipeline->programState->clone();
+        static constexpr std::array<std::string_view, Effekseer::Backend::DrawParameter::BufferSlotCount>
+            vertexUniformBlockNames = {"cb0", "cb1", "cb2", "cb3"};
+        static constexpr std::array<std::string_view, Effekseer::Backend::DrawParameter::BufferSlotCount>
+            fragmentUniformBlockNames = {"RenderConstantsPS", "ParameterDataPS", "", ""};
+        size_t boundVertexUniformBlockCount = 0;
+        size_t boundFragmentUniformBlockCount = 0;
         for (int i = 0; i < Effekseer::Backend::DrawParameter::BufferSlotCount; ++i)
         {
             auto ubv = param.VertexUniformBufferPtrs[i].DownCast<UniformBufferAX>();
             if (ubv && !ubv->data.empty())
-                ps->setUniformBlock(i, ubv->data.data(), ubv->data.size());
+                boundVertexUniformBlockCount +=
+                    ps->setUniformBlock(ax::rhi::ShaderStage::VERTEX, vertexUniformBlockNames[i], ubv->data.data(),
+                                        ubv->data.size());
             auto ubp = param.PixelUniformBufferPtrs[i].DownCast<UniformBufferAX>();
             if (ubp && !ubp->data.empty())
-                ps->setUniformBlock(i, ubp->data.data(), ubp->data.size());
+                boundFragmentUniformBlockCount +=
+                    ps->setUniformBlock(ax::rhi::ShaderStage::FRAGMENT, fragmentUniformBlockNames[i], ubp->data.data(),
+                                        ubp->data.size());
+        }
+        const auto& uniformBlocks = ps->getActiveUniformBlockInfos();
+        const auto activeVertexUniformBlockCount = static_cast<size_t>(std::count_if(
+            uniformBlocks.begin(), uniformBlocks.end(),
+            [](const ax::rhi::UniformBlockInfo& block) { return block.stage == ax::rhi::ShaderStage::VERTEX; }));
+        const auto activeFragmentUniformBlockCount = static_cast<size_t>(std::count_if(
+            uniformBlocks.begin(), uniformBlocks.end(),
+            [](const ax::rhi::UniformBlockInfo& block) { return block.stage == ax::rhi::ShaderStage::FRAGMENT; }));
+        if (boundVertexUniformBlockCount != activeVertexUniformBlockCount ||
+            boundFragmentUniformBlockCount != activeFragmentUniformBlockCount)
+        {
+            AXLOGE("Failed to bind all Effekseer graphics uniform blocks");
+            AX_SAFE_RELEASE(ps);
+            return;
         }
 
-        bindResources(ps, param.ResourceBinders, Effekseer::Backend::DrawParameter::ResourceSlotCount);
+        if (!bindResources(ps, param.ResourceBinders, Effekseer::Backend::DrawParameter::ResourceSlotCount))
+        {
+            AXLOGE("Failed to bind all Effekseer graphics resources");
+            AX_SAFE_RELEASE(ps);
+            return;
+        }
 
         if (_commandIndex >= _commands.size())
-        {
             _commands.emplace_back(std::make_unique<ax::CustomCommand>());
-            _commandStrides.emplace_back(0);
-        }
-        auto* command       = _commands[_commandIndex].get();
-        auto strideChanged  = _commandStrides[_commandIndex] != stride;
-        _commandStrides[_commandIndex] = stride;
+        auto* command = _commands[_commandIndex].get();
         _commandIndex++;
 
         command->init(_globalZOrder);
@@ -696,6 +892,7 @@ public:
             bool depthWrite = false;
             ax::rhi::CompareFunc depthFunc = ax::rhi::CompareFunc::LESS;
             ax::rhi::CullMode cullMode = ax::rhi::CullMode::NONE;
+            ax::rhi::Winding winding = ax::rhi::Winding::COUNTER_CLOCK_WISE;
         };
         auto stateBackup = std::make_shared<RenderStateBackup>();
         command->setBeforeCallback([renderer = axRenderer, stateBackup, depthTest, depthWrite, depthFunc, cullMode]() {
@@ -703,27 +900,28 @@ public:
             stateBackup->depthWrite = renderer->getDepthWrite();
             stateBackup->depthFunc  = renderer->getDepthCompareFunc();
             stateBackup->cullMode   = renderer->getCullMode();
+            stateBackup->winding    = renderer->getWinding();
             renderer->setDepthTest(depthTest);
             renderer->setDepthWrite(depthWrite);
             renderer->setDepthCompareFunc(depthFunc);
             renderer->setCullMode(cullMode);
+            renderer->setWinding(ax::rhi::Winding::COUNTER_CLOCK_WISE);
         });
         command->setAfterCallback([renderer = axRenderer, stateBackup]() {
             renderer->setDepthTest(stateBackup->depthTest);
             renderer->setDepthWrite(stateBackup->depthWrite);
             renderer->setDepthCompareFunc(stateBackup->depthFunc);
             renderer->setCullMode(stateBackup->cullMode);
+            renderer->setWinding(stateBackup->winding);
         });
 
-        if (command->getVertexCapacity() < vertexCount || strideChanged)
-            command->createVertexBuffer(stride, vertexCount, ax::CustomCommand::BufferUsage::DYNAMIC);
-        command->updateVertexBuffer(vb->shadowData(), vb->shadowSize());
+        command->setVertexBuffer(vb->get());
 
         const auto indexFormat = ib->getStrideType() == Effekseer::Backend::IndexBufferStrideType::Stride2
                                      ? ax::CustomCommand::IndexFormat::U_SHORT
                                      : ax::CustomCommand::IndexFormat::U_INT;
         command->setIndexBuffer(ib->get(), indexFormat);
-        command->setIndexDrawInfo(0, indexCount);
+        command->setIndexDrawInfo(indexOffset, indexCount);
         command->setInstanceDrawInfo(param.InstanceCount);
 
         auto& blendDesc = command->blendDesc();
@@ -742,6 +940,8 @@ public:
 
     void setGlobalZOrder(float globalZOrder) { _globalZOrder = globalZOrder; }
 
+    void beginFrame() { _commandIndex = 0; }
+
     void releaseCachedCommands()
     {
         for (auto& command : _commands)
@@ -750,26 +950,35 @@ public:
                 command->releasePSVL();
         }
         _commands.clear();
-        _commandStrides.clear();
         _commandIndex = 0;
     }
 
 private:
-    void bindResources(ax::rhi::ProgramState* ps,
-                       const std::array<Effekseer::Backend::ResourceBinder, Effekseer::Backend::DrawParameter::ResourceSlotCount>& binders,
+    template <size_t N>
+    bool bindResources(ax::rhi::ProgramState* ps,
+                       const std::array<Effekseer::Backend::ResourceBinder, N>& binders,
                        int count)
     {
-        for (int slot = 0; slot < count; ++slot)
+        if (!ps || !ps->getProgram())
+            return false;
+
+        const auto slotCount = (std::min)(static_cast<size_t>((std::max)(count, 0)), N);
+        std::vector<bool> touchedStorageSlots(slotCount, false);
+        std::vector<bool> touchedTextureSlots(slotCount, false);
+        for (size_t slot = 0; slot < slotCount; ++slot)
         {
             auto& binder = binders[slot];
             if (auto* sb = std::get_if<Effekseer::Backend::StorageBufferBinder>(&binder))
             {
                 auto sbb = sb->StorageBuffer.DownCast<StorageBufferAX>();
                 if (sbb && sbb->get())
-                    ps->setStorageBuffer(slot, sbb->get(),
+                {
+                    ps->setStorageBuffer(static_cast<int>(slot), sbb->get(),
                                          sb->Access == Effekseer::Backend::StorageBufferAccess::ReadWrite
                                              ? ax::rhi::BufferAccess::READ_WRITE
                                              : ax::rhi::BufferAccess::READ_ONLY);
+                    touchedStorageSlots[slot] = true;
+                }
             }
             else if (auto* tb = std::get_if<Effekseer::Backend::TextureBinder>(&binder))
             {
@@ -780,16 +989,19 @@ private:
                 ax::rhi::UniformLocation textureLocation;
                 for (auto& [name, info] : ps->getProgram()->getActiveTextureInfos())
                 {
-                    if (info->location == slot)
+                    if (info->location == static_cast<int>(slot))
                     {
                         textureLocation = ps->getUniformLocation(name);
                         break;
                     }
                 }
                 if (textureLocation)
-                    ps->setTexture(textureLocation, 0, tex->get());
+                {
+                    ps->setTexture(textureLocation, static_cast<int>(slot), tex->get());
+                    touchedTextureSlots[slot] = true;
+                }
 
-                auto samplerLoc = ps->getProgram()->getTextureSamplerLocation(slot);
+                auto samplerLoc = ps->getProgram()->getTextureSamplerLocation(static_cast<int>(slot));
                 if (samplerLoc)
                 {
                     const auto filter = tb->SamplingType == Effekseer::Backend::TextureSamplingType::Linear
@@ -801,15 +1013,50 @@ private:
                                                   ? Effekseer::TextureWrapType::Repeat
                                                   : Effekseer::TextureWrapType::Clamp;
                     ps->setSampler(samplerLoc, ToSamplerDesc(filter, wrap));
+
+                    const auto& samplers = ps->getProgram()->getActiveSamplerInfos();
+                    auto sampler = std::find_if(samplers.begin(), samplers.end(), [samplerLoc](const auto& info) {
+                        return info.binding == samplerLoc.binding && info.space == samplerLoc.space;
+                    });
+                    if (sampler != samplers.end() && sampler->presetIndex < 0 &&
+                        !ps->getSamplerOverride(samplerLoc.binding))
+                        return false;
                 }
             }
         }
+
+        const auto& storageBindings = ps->getStorageBufferBindingSets();
+        for (const auto& storage : ps->getProgram()->getActiveStorageBufferInfos())
+        {
+            if (storage.binding < 0 || static_cast<size_t>(storage.binding) >= touchedStorageSlots.size() ||
+                !touchedStorageSlots[storage.binding])
+                return false;
+            auto binding = storageBindings.find(storage.binding);
+            if (binding == storageBindings.end() || !binding->second.buffer ||
+                binding->second.access != storage.access)
+                return false;
+        }
+
+        const auto& textureBindings = ps->getTextureBindingSets();
+        for (const auto& [_, texture] : ps->getProgram()->getActiveTextureInfos())
+        {
+            if (texture->location < 0 || static_cast<size_t>(texture->location) >= touchedTextureSlots.size() ||
+                !touchedTextureSlots[texture->location])
+                return false;
+            auto binding = textureBindings.find(texture->location);
+            if (binding == textureBindings.end() || binding->second.texs.size() != texture->count)
+                return false;
+            if (std::any_of(binding->second.texs.begin(), binding->second.texs.end(),
+                            [](const ax::rhi::Texture* value) { return value == nullptr; }))
+                return false;
+        }
+
+        return true;
     }
 
     class Renderer* _renderer = nullptr;
     float _globalZOrder        = 0.0f;
     std::vector<std::unique_ptr<ax::CustomCommand>> _commands;
-    std::vector<size_t> _commandStrides;
     size_t _commandIndex = 0;
 
     std::string GetDeviceName() const override { return "Axmol RHI"; }
@@ -1255,6 +1502,41 @@ public:
     explicit RendererAdapter(Renderer* renderer) : Base(renderer) {}
 };
 
+class GpuParticleFactoryAX final : public EffekseerRenderer::GpuParticleFactory
+{
+public:
+    using EffekseerRenderer::GpuParticleFactory::GpuParticleFactory;
+
+    Effekseer::GpuParticles::ResourceRef CreateResource(const Effekseer::GpuParticles::ParamSet& paramSet,
+                                                        const Effekseer::Effect* effect) override
+    {
+        auto resource = EffekseerRenderer::GpuParticleFactory::CreateResource(paramSet, effect);
+        auto axResource = resource.DownCast<EffekseerRenderer::GpuParticles::Resource>();
+        if (!axResource || !axResource->ParamBuffer)
+        {
+            AXLOGE("Failed to create Effekseer GPU particle parameter resources");
+            return nullptr;
+        }
+
+        if (paramSet.Force.TurbulencePower != 0.0f && !axResource->NoiseTexture)
+        {
+            AXLOGE("Failed to create the Effekseer GPU particle turbulence Texture3D");
+            return nullptr;
+        }
+
+        const auto colorType = paramSet.RenderColor.ColorAllType;
+        if ((colorType == Effekseer::GpuParticles::ColorParamType::FCurve ||
+             colorType == Effekseer::GpuParticles::ColorParamType::Gradient) &&
+            !axResource->GradientTexture)
+        {
+            AXLOGE("Failed to create the Effekseer GPU particle gradient texture");
+            return nullptr;
+        }
+
+        return resource;
+    }
+};
+
 /**
  * @brief Axmol GPU particle system: loads the five compiled GPU particle shaders
  * and hands them to the EffekseerRenderer::GpuParticleSystem common implementation.
@@ -1266,21 +1548,41 @@ public:
 
     bool InitSystem(const Settings& settings) override
     {
-        auto loadComputeShader = [](const char* name) -> Effekseer::Backend::ShaderRef {
+        if (!RegisterGpuParticleSamplers())
+        {
+            AXLOGE("Failed to register Effekseer GPU particle custom samplers");
+            return false;
+        }
+
+        auto graphics = renderer_->GetGraphicsDevice();
+        if (!graphics)
+        {
+            AXLOGE("Effekseer GPU particle system has no graphics device");
+            return false;
+        }
+
+        auto loadArchive = [](const char* name) -> ax::Data {
             auto file = ax::FileUtils::getInstance()->fullPathForFilename(name);
+            if (file.empty())
+            {
+                AXLOGE("Effekseer GPU particle shader archive was not found: {}", name);
+                return {};
+            }
+
             auto data = ax::FileUtils::getInstance()->getDataFromFile(file);
+            if (data.isNull())
+                AXLOGE("Failed to read Effekseer GPU particle shader archive: {}", file);
+            return data;
+        };
+        auto loadComputeShader = [&loadArchive, &graphics](const char* name) -> Effekseer::Backend::ShaderRef {
+            auto data = loadArchive(name);
             if (data.isNull())
                 return nullptr;
 
-            auto program = ax::rhi::GraphicsCore::device()->createComputeProgram(std::move(data));
-            if (!program || !program->isValid())
-            {
-                AX_SAFE_RELEASE(program);
-                return nullptr;
-            }
-            auto ret = Effekseer::MakeRefPtr<ShaderAX>(program);
-            AX_SAFE_RELEASE(program);
-            return ret;
+            auto shader = graphics->CreateComputeShader(data.getBytes(), static_cast<int32_t>(data.getSize()));
+            if (!shader)
+                AXLOGE("Failed to create Effekseer GPU particle compute shader: {}", name);
+            return shader;
         };
 
         Shaders shaders;
@@ -1288,21 +1590,42 @@ public:
         shaders.CsParticleSpawn  = loadComputeShader("custom/gpu_particles_spawn_cs");
         shaders.CsParticleUpdate = loadComputeShader("custom/gpu_particles_update_cs");
 
-        auto renderProgram = ax::ProgramManager::getInstance()->loadProgram("custom/gpu_particles_render_vs",
-                                                                            "custom/gpu_particles_render_ps");
-        if (renderProgram)
-            shaders.RsParticleRender = Effekseer::MakeRefPtr<ShaderAX>(renderProgram);
+        auto renderVS = loadArchive("custom/gpu_particles_render_vs");
+        auto renderPS = loadArchive("custom/gpu_particles_render_ps");
+        if (!renderVS.isNull() && !renderPS.isNull())
+        {
+            shaders.RsParticleRender = graphics->CreateShaderFromBinary(
+                renderVS.getBytes(), static_cast<int32_t>(renderVS.getSize()),
+                renderPS.getBytes(), static_cast<int32_t>(renderPS.getSize()));
+            if (!shaders.RsParticleRender)
+                AXLOGE("Failed to create the Effekseer GPU particle render shader");
+        }
 
         if (!shaders.CsParticleClear || !shaders.CsParticleSpawn || !shaders.CsParticleUpdate ||
             !shaders.RsParticleRender)
+            return false;
+
+        // Validate shader archives before allocating the large persistent
+        // particle and trail buffers.
+        if (!GpuParticleSystem::InitSystem(settings))
         {
+            AXLOGE("Failed to allocate Effekseer GPU particle system resources");
             return false;
         }
 
         if (!SetShaders(shaders))
+        {
+            AXLOGE("Failed to create Effekseer GPU particle compute pipelines");
             return false;
+        }
 
-        return GpuParticleSystem::InitSystem(settings);
+        EffekseerRenderer::GpuParticles::PipelineStateKey renderKey{};
+        if (!GetOrCreatePipelineState(renderKey))
+        {
+            AXLOGE("Failed to create the Effekseer GPU particle render pipeline");
+            return false;
+        }
+        return true;
     }
 };
 
@@ -1325,6 +1648,8 @@ Renderer::~Renderer()
     _currentIndexBuffer = nullptr;
     GetImpl()->DeleteProxyTextures(this);
     _distortingCallback = nullptr; // weak ref to manager
+    if (_graphicsDevice)
+        static_cast<GraphicsDevice*>(_graphicsDevice.Get())->setAxmolRenderer(nullptr);
 }
 
 bool Renderer::initialize()
@@ -1389,9 +1714,15 @@ void Renderer::BeginFrame(ax::Renderer* renderer)
     _axRenderer = renderer;
     _commandIndex = 0;
     if (_graphicsDevice)
-    {
-        static_cast<GraphicsDevice*>(_graphicsDevice.Get())->setGlobalZOrder(_globalZOrder);
-    }
+        static_cast<GraphicsDevice*>(_graphicsDevice.Get())->beginFrame();
+    SetGlobalZOrder(_globalZOrder);
+}
+
+void Renderer::SetGlobalZOrder(float globalZOrder)
+{
+    _globalZOrder = globalZOrder;
+    if (_graphicsDevice)
+        static_cast<GraphicsDevice*>(_graphicsDevice.Get())->setGlobalZOrder(globalZOrder);
 }
 
 void Renderer::ReleaseCachedCommands()
@@ -1437,49 +1768,33 @@ Effekseer::TrackRendererRef Renderer::CreateTrackRenderer()
 Effekseer::GpuParticleSystemRef Renderer::CreateGpuParticleSystem(const Effekseer::GpuParticleSystem::Settings& settings)
 {
     auto device = ax::rhi::GraphicsCore::device();
-    if (!device)
-        return nullptr;
-
-    // GPU particles require compute shaders, storage buffers and Texture3D.
-    const auto& caps = device->getCaps();
-    const bool supported =
-        device->checkForFeatureSupported(ax::rhi::FeatureType::COMPUTE_SHADER) &&
-        device->checkForFeatureSupported(ax::rhi::FeatureType::STORAGE_BUFFER) &&
-        device->checkForFeatureSupported(ax::rhi::FeatureType::TEXTURE_3D) &&
-        caps.maxComputeWorkGroupSize[0] >= 256 && caps.maxStorageBufferBindings >= 2 && caps.maxTexture3DSize >= 8;
-    if (!supported)
+    if (!SupportsGpuParticleSettings(device, settings))
     {
         static bool s_warned = false;
         if (!s_warned)
         {
             s_warned = true;
-            AXLOGD("Effekseer GPU particles are not supported by the current RHI backend; using CPU particles.");
+            AXLOGD("Effekseer GPU particles are not supported by the current RHI backend; GPU particle nodes will be skipped.");
         }
         return nullptr;
     }
 
     auto system = Effekseer::MakeRefPtr<GpuParticleSystemAX>(this);
     if (!system->InitSystem(settings))
+    {
+        AXLOGE("Failed to initialize the Effekseer GPU particle system");
         return nullptr;
+    }
     return system;
 }
 
 Effekseer::GpuParticleFactoryRef Renderer::CreateGpuParticleFactory()
 {
     auto device = ax::rhi::GraphicsCore::device();
-    if (!device)
+    if (!SupportsGpuParticleFeatures(device))
         return nullptr;
 
-    const auto& caps = device->getCaps();
-    const bool supported =
-        device->checkForFeatureSupported(ax::rhi::FeatureType::COMPUTE_SHADER) &&
-        device->checkForFeatureSupported(ax::rhi::FeatureType::STORAGE_BUFFER) &&
-        device->checkForFeatureSupported(ax::rhi::FeatureType::TEXTURE_3D) &&
-        caps.maxComputeWorkGroupSize[0] >= 256 && caps.maxStorageBufferBindings >= 2 && caps.maxTexture3DSize >= 8;
-    if (!supported)
-        return nullptr;
-
-    return Effekseer::MakeRefPtr<EffekseerRenderer::GpuParticleFactory>(_graphicsDevice);
+    return Effekseer::MakeRefPtr<GpuParticleFactoryAX>(_graphicsDevice);
 }
 
 Effekseer::TextureLoaderRef Renderer::CreateTextureLoader(Effekseer::FileInterfaceRef fileInterface)

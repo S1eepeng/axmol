@@ -8,6 +8,7 @@ project(${APP_NAME})
 set_source_files_properties(
   "${CMAKE_CURRENT_SOURCE_DIR}/Source/Shaders/compute_dispatch_cs.hlsl"
   "${CMAKE_CURRENT_SOURCE_DIR}/Source/Shaders/compute_dispatch_vs.hlsl"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Source/Shaders/compute_dispatch_ps.hlsl"
   PROPERTIES
     AXSLCC_TARGETS "gl-430;gles-310;d3d11;d3d12;vk;mtl"
 )

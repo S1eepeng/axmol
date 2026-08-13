@@ -160,7 +160,9 @@ GraphicsContextImpl::GraphicsContextImpl(GraphicsDeviceImpl* driver, SurfaceHand
     _descriptorImageInfosPerFrame.reserve(16);
 
     // Create per-frame uniform ring buffers (capacity can be tuned)
-    createUniformRingBuffers(2 * 1024 * 1024);  // 2 MB per frame
+    // Match the D3D12 per-frame budget. Effekseer's default GPU particle
+    // settings can consume over 1 MB of aligned uniform slices on their own.
+    createUniformRingBuffers(4 * 1024 * 1024);  // 4 MB per frame
 }
 
 GraphicsContextImpl::~GraphicsContextImpl()
@@ -1086,19 +1088,27 @@ void GraphicsContextImpl::prepareDrawing()
     auto& descriptorSets = descriptorState->sets;
 
     assert(descriptorSets[SET_INDEX_UBO]);
-    if (descriptorState->imageDescriptorCount || descriptorState->combinedDescriptorCount)
+    if (descriptorState->imageDescriptorCount || descriptorState->combinedDescriptorCount ||
+        descriptorState->storageDescriptorCount)
         assert(descriptorSets[SET_INDEX_RESOURCE]);
     if (descriptorState->samplerDescriptorCount)
         assert(descriptorSets[SET_INDEX_RESOURCE]);
+    const auto& activeSamplerInfos = _programState->getProgram()->getActiveSamplerInfos();
+    if (std::any_of(activeSamplerInfos.begin(), activeSamplerInfos.end(), [](const SamplerBindingInfo& sampler) {
+            return sampler.presetIndex < 0;
+        }))
+        assert(descriptorSets[SET_INDEX_CUSTOM_SAMPLER]);
 
-    // Prepare write lists sized to expected UBO + sampler descriptors
+    // Descriptor writes keep pointers into the buffer/image info vectors.
+    // Reserve the complete reflected count up front so those pointers remain stable.
     auto& writes = _descriptorWritesPerFrame;
     writes.clear();
     writes.reserve(descriptorState->uniformDescriptorCount + descriptorState->imageDescriptorCount +
-                   descriptorState->samplerDescriptorCount + descriptorState->combinedDescriptorCount);
+                   descriptorState->samplerDescriptorCount + descriptorState->combinedDescriptorCount +
+                   descriptorState->storageDescriptorCount);
 
     _descriptorBufferInfos.clear();
-    _descriptorBufferInfos.reserve(descriptorState->uniformDescriptorCount);
+    _descriptorBufferInfos.reserve(descriptorState->uniformDescriptorCount + descriptorState->storageDescriptorCount);
 
     auto& cpuBuffer = _programState->getUniformBuffer();
     if (!cpuBuffer.empty())
@@ -1147,7 +1157,6 @@ void GraphicsContextImpl::prepareDrawing()
         write.pBufferInfo     = &bufferInfo;
     }
 
-    const auto& activeSamplerInfos = _programState->getProgram()->getActiveSamplerInfos();
     const bool separateSamplers    = !activeSamplerInfos.empty();
 
     // --- Sampled images / combined image samplers (set=1, binding=N) ---
@@ -1233,6 +1242,11 @@ void GraphicsContextImpl::prepareDrawing()
             // Both have DXC-shifted bindings from SPIR-V.
             auto dstSet = samplerInfo.presetIndex >= 0 ? descriptorSets[SET_INDEX_RESOURCE]
                                                        : descriptorSets[SET_INDEX_CUSTOM_SAMPLER];
+            if (!dstSet)
+            {
+                AXASSERT(false, "Missing Vulkan sampler descriptor set");
+                continue;
+            }
 
             VkWriteDescriptorSet& write = writes.emplace_back();
             write.sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1327,21 +1341,64 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         }
     }
 
-    _programState = desc.programState;
-
     auto* computePipeline = static_cast<ComputePipelineImpl*>(desc.pipeline);
     if (computePipeline->getPipeline() == VK_NULL_HANDLE)
         return false;
+
+    _programState = desc.programState;
+
+    // A particle buffer is read by the render VS and written again by compute
+    // on the next frame. Order that read-to-write transition explicitly; the
+    // post-dispatch barrier below handles compute writes consumed later.
+    tlx::pod_vector<VkBufferMemoryBarrier> preBarriers;
+    for (const auto& [binding, bindingSet] : storageBindings)
+    {
+        if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_WRITE)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        VkBufferMemoryBarrier& barrier = preBarriers.emplace_back();
+        barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.srcAccessMask       = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer              = bufferImpl->internalHandle();
+        barrier.offset              = 0;
+        barrier.size                = VK_WHOLE_SIZE;
+    }
+    if (!preBarriers.empty())
+    {
+        vkCmdPipelineBarrier(_currentCmdBuffer,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                             static_cast<uint32_t>(preBarriers.size()), preBarriers.data(), 0, nullptr);
+    }
 
     auto descriptorState = computePipeline->acquireDescriptorState();
     _inFlightComputeDescriptorStates[_frameIndex].emplace_back(
         InFlightComputeDescriptorState{RefPtr<ComputePipelineImpl>(computePipeline), descriptorState});
     auto& descriptorSets = descriptorState->sets;
 
+    if (descriptorState->uniformDescriptorCount)
+        AXASSERT(descriptorSets[SET_INDEX_UBO], "Missing Vulkan compute uniform descriptor set");
+    if (descriptorState->imageDescriptorCount || descriptorState->combinedDescriptorCount ||
+        descriptorState->storageDescriptorCount)
+        AXASSERT(descriptorSets[SET_INDEX_RESOURCE], "Missing Vulkan compute resource descriptor set");
+    const auto& computeSamplerInfos = program->getActiveSamplerInfos();
+    if (std::any_of(computeSamplerInfos.begin(), computeSamplerInfos.end(), [](const SamplerBindingInfo& sampler) {
+            return sampler.presetIndex < 0;
+        }))
+        AXASSERT(descriptorSets[SET_INDEX_CUSTOM_SAMPLER], "Missing Vulkan compute custom sampler descriptor set");
+
     _descriptorWritesPerFrame.clear();
-    _descriptorWritesPerFrame.reserve(16);
+    _descriptorWritesPerFrame.reserve(descriptorState->uniformDescriptorCount + descriptorState->imageDescriptorCount +
+                                      descriptorState->samplerDescriptorCount +
+                                      descriptorState->combinedDescriptorCount +
+                                      descriptorState->storageDescriptorCount);
     _descriptorBufferInfos.clear();
-    _descriptorBufferInfos.reserve(8);
+    _descriptorBufferInfos.reserve(descriptorState->uniformDescriptorCount +
+                                   descriptorState->storageDescriptorCount);
     auto& writes = _descriptorWritesPerFrame;
 
     // UBOs from the uniform ring buffer.
@@ -1392,11 +1449,12 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     }
 
     // Textures -> set 1, SAMPLED_IMAGE / COMBINED_IMAGE_SAMPLER.
-    const auto& activeSamplerInfos = program->getActiveSamplerInfos();
+    const auto& activeSamplerInfos = computeSamplerInfos;
     const bool separateSamplers    = !activeSamplerInfos.empty();
     auto& imageInfos               = _descriptorImageInfosPerFrame;
     imageInfos.clear();
-    imageInfos.reserve(8);
+    imageInfos.reserve(descriptorState->imageDescriptorCount + descriptorState->samplerDescriptorCount +
+                       descriptorState->combinedDescriptorCount);
 
     for (const auto& [bindingIndex, bindingSet] : desc.programState->getTextureBindingSets())
     {
@@ -1490,7 +1548,7 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         VkBufferMemoryBarrier& barrier = barriers.emplace_back();
         barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         barrier.srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.buffer              = bufferImpl->internalHandle();

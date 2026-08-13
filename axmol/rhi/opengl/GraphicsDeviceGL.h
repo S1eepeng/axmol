@@ -142,6 +142,12 @@ public:
 
     std::string getShaderVersion() const override;
 
+    /** Returns the active GLSL/ESSL profile as 330, 430, 300, 310, etc. */
+    int getShaderProfile() const
+    {
+        return static_cast<int>(_verInfo.major) * 100 + static_cast<int>(_verInfo.minor) * 10;
+    }
+
     /**
      * Check does device has extension.
      */
@@ -192,6 +198,7 @@ private:
     const char* _version{nullptr};
 
     DriverCapImpl _cap{};
+    bool _computeEntryPoints{false};
 };
 // end of _opengl group
 /// @}

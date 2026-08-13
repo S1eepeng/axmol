@@ -69,7 +69,7 @@ public:
 
     void BeginFrame(ax::Renderer* renderer);
     void ReleaseCachedCommands();
-    void SetGlobalZOrder(float globalZOrder) { _globalZOrder = globalZOrder; }
+    void SetGlobalZOrder(float globalZOrder);
 
     ax::Renderer* getAxRenderer() const { return _axRenderer; }
 

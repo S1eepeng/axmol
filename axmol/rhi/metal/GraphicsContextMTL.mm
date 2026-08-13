@@ -255,8 +255,10 @@ void GraphicsContextImpl::beginRenderPass(RenderTarget* renderTarget, const Rend
         return;
     }
 
-    _currentRT             = renderTarget;
-    _currentRenderPassDesc = renderPassDesc;
+    const bool resumeInterruptedPass = _renderPassInterrupted && _currentRT == renderTarget;
+    _renderPassInterrupted           = false;
+    _currentRT                       = renderTarget;
+    _currentRenderPassDesc           = renderPassDesc;
 
     if (_mtlRenderEncoder != nil)
     {
@@ -267,7 +269,13 @@ void GraphicsContextImpl::beginRenderPass(RenderTarget* renderTarget, const Rend
 
     MTLRenderPassDescriptor* mtlDesc = [MTLRenderPassDescriptor renderPassDescriptor];
     auto rtMTL                       = static_cast<RenderTargetImpl*>(_currentRT);
-    rtMTL->applyRenderPassAttachments(renderPassDesc, mtlDesc);
+    auto nativeRenderPassDesc        = renderPassDesc;
+    if (resumeInterruptedPass)
+    {
+        nativeRenderPassDesc.flags.clear        = TargetBufferFlags::NONE;
+        nativeRenderPassDesc.flags.discardStart = TargetBufferFlags::NONE;
+    }
+    rtMTL->applyRenderPassAttachments(nativeRenderPassDesc, mtlDesc);
 
     _renderTargetWidth  = (unsigned int)mtlDesc.colorAttachments[0].texture.width;
     _renderTargetHeight = (unsigned int)mtlDesc.colorAttachments[0].texture.height;
@@ -406,14 +414,22 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     if (pipelineState == nil)
         return false;
 
-    // Compute runs outside render passes: end any active render encoder so the
-    // compute encoder is recorded on the same command buffer. The caller must
-    // re-issue beginRenderPass for subsequent draws.
+    // Compute runs outside render passes. Preserve the current attachments and
+    // let the next normal beginRenderPass() resume them with load actions.
     if (_mtlRenderEncoder)
     {
+        auto rtMTL = static_cast<RenderTargetImpl*>(_currentRT);
+        for (size_t i = 0; i < rtMTL->getNativeColorFormats().size(); ++i)
+            [_mtlRenderEncoder setColorStoreAction:MTLStoreActionStore atIndex:i];
+        if (rtMTL->getDepthStencilAttachment())
+        {
+            [_mtlRenderEncoder setDepthStoreAction:MTLStoreActionStore];
+            [_mtlRenderEncoder setStencilStoreAction:MTLStoreActionStore];
+        }
         [_mtlRenderEncoder endEncoding];
         [_mtlRenderEncoder release];
         _mtlRenderEncoder = nil;
+        _renderPassInterrupted = true;
     }
 
     id<MTLComputeCommandEncoder> computeEncoder = [_currentCmdBuffer computeCommandEncoder];
@@ -508,6 +524,7 @@ void GraphicsContextImpl::endFrame()
     [_mtlRenderEncoder endEncoding];
     [_mtlRenderEncoder release];
     _mtlRenderEncoder = nil;
+    _renderPassInterrupted = false;
 
     auto drawable = acquireDrawable();
     [_currentCmdBuffer presentDrawable:drawable];
@@ -544,6 +561,7 @@ void GraphicsContextImpl::submitCurrentFrameCommands(bool waitForCompletion)
     [_currentCmdBuffer retain];
     _currentRenderPassDesc = {};
     _currentRT             = nullptr;
+    _renderPassInterrupted = false;
 }
 
 void GraphicsContextImpl::endEncoding()
@@ -690,24 +708,25 @@ void GraphicsContextImpl::setUniformBuffer() const
             cb.second(_programState, cb.first);
 
         auto& cpuBuffer = _programState->getUniformBuffer();
-        if (cpuBuffer.empty())
-            return;
-        const auto bufferPtr = cpuBuffer.data();
-        for (auto& uboInfo : _programState->getActiveUniformBlockInfos())
+        if (!cpuBuffer.empty())
         {
-            switch (uboInfo.stage)
+            const auto bufferPtr = cpuBuffer.data();
+            for (auto& uboInfo : _programState->getActiveUniformBlockInfos())
             {
-            case ShaderStage::VERTEX:
-                [_mtlRenderEncoder setVertexBytes:bufferPtr + uboInfo.cpuOffset
-                                           length:uboInfo.sizeBytes
-                                          atIndex:uboInfo.binding];
-                break;
-            case ShaderStage::FRAGMENT:
-                [_mtlRenderEncoder setFragmentBytes:bufferPtr + uboInfo.cpuOffset
-                                             length:uboInfo.sizeBytes
-                                            atIndex:uboInfo.binding];
-                break;
-            default:;
+                switch (uboInfo.stage)
+                {
+                case ShaderStage::VERTEX:
+                    [_mtlRenderEncoder setVertexBytes:bufferPtr + uboInfo.cpuOffset
+                                               length:uboInfo.sizeBytes
+                                              atIndex:uboInfo.binding];
+                    break;
+                case ShaderStage::FRAGMENT:
+                    [_mtlRenderEncoder setFragmentBytes:bufferPtr + uboInfo.cpuOffset
+                                                 length:uboInfo.sizeBytes
+                                                atIndex:uboInfo.binding];
+                    break;
+                default:;
+                }
             }
         }
 

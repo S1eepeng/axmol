@@ -34,6 +34,7 @@
 #include "axmol/rhi/opengl/RenderTargetGL.h"
 #include "axmol/rhi/opengl/GraphicsDeviceGL.h"
 #include "axmol/rhi/opengl/VertexLayoutGL.h"
+#include "axmol/rhi/opengl/ComputePipelineGL.h"
 #include "axmol/rhi/SamplerRegistry.h"
 #include "axmol/rhi/RHIUtils.h"
 
@@ -691,10 +692,10 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 
     CHECK_GL_ERROR_DEBUG();
 
-    glDispatchCompute(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
+    dispatchCompute(desc.groupCountX, desc.groupCountY, desc.groupCountZ);
 
     // Make compute writes visible to subsequent compute/vertex/fragment reads.
-    glMemoryBarrier(GL_ALL_BARRIER_BITS);
+    memoryBarrier(GL_ALL_BARRIER_BITS);
 
     // Unbind storage buffers to avoid stale SSBO bindings leaking into later draws.
     for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())

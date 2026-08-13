@@ -16,9 +16,38 @@
 #    define GL_COMPUTE_SHADER 0x91B9
 #endif
 
-// Compute shader support at compile time: true when the GL headers expose
-// the 4.3+ / GLES 3.1+ compute and SSBO APIs (desktop GL loaders only for now).
-#if !defined(AX_GLES_PROFILE) || AX_GLES_PROFILE >= 310
+#ifndef GL_MAX_COMPUTE_WORK_GROUP_COUNT
+#    define GL_MAX_COMPUTE_WORK_GROUP_COUNT 0x91BE
+#endif
+
+#ifndef GL_MAX_COMPUTE_WORK_GROUP_SIZE
+#    define GL_MAX_COMPUTE_WORK_GROUP_SIZE 0x91BF
+#endif
+
+#ifndef GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS
+#    define GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS 0x90EB
+#endif
+
+#ifndef GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS
+#    define GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS 0x90DD
+#endif
+
+#ifndef GL_MAX_SHADER_STORAGE_BLOCK_SIZE
+#    define GL_MAX_SHADER_STORAGE_BLOCK_SIZE 0x90DE
+#endif
+
+#ifndef GL_ALL_BARRIER_BITS
+#    define GL_ALL_BARRIER_BITS 0xFFFFFFFF
+#endif
+
+// Compute shader support at compile time. Axmol's desktop glad loader exposes
+// the GL 4.3 entry points. The GLES 3.0 glad loader does not expose the two
+// GLES 3.1 compute commands, so supported EGL platforms resolve them at
+// runtime. iOS OpenGLES and WebGL remain on the CPU fallback.
+#if (!AX_GLES_PROFILE &&                                                                                 \
+     (AX_TARGET_PLATFORM == AX_PLATFORM_WIN32 || AX_TARGET_PLATFORM == AX_PLATFORM_LINUX)) ||          \
+    (AX_GLES_PROFILE &&                                                                                  \
+     (AX_TARGET_PLATFORM == AX_PLATFORM_WIN32 || AX_TARGET_PLATFORM == AX_PLATFORM_ANDROID))
 #    define AX_GL_HAS_COMPUTE 1
 #else
 #    define AX_GL_HAS_COMPUTE 0
@@ -28,6 +57,13 @@
 
 namespace ax::rhi::gl
 {
+
+#if AX_GL_HAS_COMPUTE
+bool loadComputeEntryPoints();
+bool hasComputeEntryPoints();
+void dispatchCompute(GLuint groupCountX, GLuint groupCountY, GLuint groupCountZ);
+void memoryBarrier(GLbitfield barriers);
+#endif
 
 struct BlendEquationSeparateState
 {

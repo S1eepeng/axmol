@@ -243,7 +243,11 @@ GraphicsContextImpl::GraphicsContextImpl(GraphicsDeviceImpl* driver, SurfaceHand
     // Build swapchain attachments for screen RT
     _screenRT->rebuildSwapchainBuffers(_swapchain.Get(), _screenWidth, _screenHeight);
 
-    createUniformRingBuffers(1 * 1024 * 1024);  // 1 MB per frame
+    // Effekseer's default GPU particle system can submit clear/spawn/update/render
+    // constants for up to 256 emitters in one frame. Keep enough headroom for
+    // those allocations and the rest of the scene without reusing an in-flight
+    // slice from the same frame.
+    createUniformRingBuffers(4 * 1024 * 1024);  // 4 MB per frame
 
     createDescriptorHeaps();
 
@@ -676,14 +680,12 @@ void GraphicsContextImpl::updatePipelineState(const RenderTarget* rt,
     }
 
     const auto customSamplerRootIndex = rootSigInfo->customSamplerRootIndex;
-    if (dirtyFlags && customSamplerRootIndex != UINT_MAX)
+    if (customSamplerRootIndex != UINT_MAX)
     {
-        D3D12_GPU_DESCRIPTOR_HANDLE customGpuHandle;
-        if (rootSigInfo->customSamplerBatch)
-            customGpuHandle = rootSigInfo->customSamplerBatch->gpu;
-        else
-            customGpuHandle = _driver->getSamplerHeap()->GetGPUDescriptorHandleForHeapStart();
-        _currentCmdList->SetGraphicsRootDescriptorTable(customSamplerRootIndex, customGpuHandle);
+        auto* batch = _renderPipeline->getCustomSamplerBatch(_programState);
+        AXASSERT(batch, "Failed to resolve D3D12 custom sampler descriptors");
+        if (batch)
+            _currentCmdList->SetGraphicsRootDescriptorTable(customSamplerRootIndex, batch->gpu);
     }
 }
 
@@ -834,8 +836,7 @@ void GraphicsContextImpl::prepareDrawing(ID3D12GraphicsCommandList* cmd)
     if (!textureBindingSets.empty() || !storageBindingSets.empty())
     {
         const auto bindingStart = _srvOffset[_frameIndex];
-
-        int maxSlot = -1;
+        UINT slot               = 0;
 
         // Transition storage buffers from compute write state (UAV) to graphics
         // read state (SRV) before the draw consumes them.
@@ -862,34 +863,34 @@ void GraphicsContextImpl::prepareDrawing(ID3D12GraphicsCommandList* cmd)
         if (!storageBarriers.empty())
             cmd->ResourceBarrier(static_cast<UINT>(storageBarriers.size()), storageBarriers.data());
 
-        // Copy storage buffer SRVs (bound first in the SRV table).
-        for (auto& [binding, bindingSet] : storageBindingSets)
+        // Copy resources in exactly the same reflection order used to build
+        // the root-signature descriptor ranges.
+        auto* program = _programState->getProgram();
+        for (const auto& storageInfo : program->getActiveStorageBufferInfos())
         {
-            if (!bindingSet.buffer)
+            auto binding = storageBindingSets.find(storageInfo.binding);
+            if (binding == storageBindingSets.end() || !binding->second.buffer)
                 continue;
-            auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+            auto bufferImpl = static_cast<BufferImpl*>(binding->second.buffer);
             auto srvHandle  = bufferImpl->getSRV();
             if (!srvHandle)
                 continue;
 
-            if (maxSlot < static_cast<int>(binding))
-                maxSlot = static_cast<int>(binding);
-
             auto dstSrv = srvCpuStart;
-            dstSrv.ptr += (bindingStart + binding) * srvStride;
+            dstSrv.ptr += (bindingStart + slot) * srvStride;
             _device->CopyDescriptorsSimple(1, dstSrv, srvHandle->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            ++slot;
         }
 
-        // Copy descriptors for each texture in the binding set
-        for (auto& [bindingIndex, bindingSet] : textureBindingSets)
+        for (const auto& [_, textureInfo] : program->getActiveTextureInfos())
         {
+            auto binding = textureBindingSets.find(textureInfo->location);
+            if (binding == textureBindingSets.end())
+                continue;
+            auto& bindingSet = binding->second;
             const auto count = static_cast<int>(bindingSet.texs.size());
             for (int i = 0; i < count; ++i)
             {
-                const int slot = bindingIndex + i;
-                if (maxSlot < slot)
-                    maxSlot = slot;
-
                 auto textureImpl = static_cast<TextureImpl*>(bindingSet.texs[i]);
                 textureImpl->setLastFenceValue(_frameFenceValue);
                 auto srvHandle = textureImpl->internalHandle().srv;
@@ -898,16 +899,18 @@ void GraphicsContextImpl::prepareDrawing(ID3D12GraphicsCommandList* cmd)
                 auto dstSrv = srvCpuStart;
                 dstSrv.ptr += (bindingStart + slot) * srvStride;
                 _device->CopyDescriptorsSimple(1, dstSrv, srvHandle->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                ++slot;
             }
         }
 
-        // Bind GPU handles for this batch
-        auto srvGpuStart = srvHeap->GetGPUDescriptorHandleForHeapStart();
-        srvGpuStart.ptr += static_cast<UINT64>(bindingStart) * srvStride;
-        _currentCmdList->SetGraphicsRootDescriptorTable(rootSigInfo->srvRootIndex, srvGpuStart);
+        if (slot > 0 && rootSigInfo->srvRootIndex != UINT_MAX)
+        {
+            auto srvGpuStart = srvHeap->GetGPUDescriptorHandleForHeapStart();
+            srvGpuStart.ptr += static_cast<UINT64>(bindingStart) * srvStride;
+            _currentCmdList->SetGraphicsRootDescriptorTable(rootSigInfo->srvRootIndex, srvGpuStart);
+        }
 
-        // Advance offsets for the next batch
-        _srvOffset[_frameIndex] = bindingStart + static_cast<UINT>(maxSlot + 1);
+        _srvOffset[_frameIndex] = bindingStart + slot;
     }
 }
 
@@ -997,14 +1000,6 @@ GraphicsContextImpl::UniformSlice GraphicsContextImpl::allocateUniformSlice(UINT
     auto alignMask     = ring.align - 1;
     size_t alignedSize = (size + alignMask) & ~alignMask;
     size_t alignedHead = (ring.writeHead + alignMask) & ~alignMask;
-
-    // Simple wrap-around strategy: reset if not enough room
-    if (alignedHead + alignedSize > ring.capacity)
-    {
-        // In a robust system, you'd either assert, grow, or sub-allocate fallback.
-        // Here we wrap to start and expect per-frame reset is used correctly.
-        alignedHead = 0;
-    }
 
     AXASSERT(alignedHead + alignedSize <= ring.capacity, "Uniform ring buffer overflow");
 
@@ -1189,11 +1184,11 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         }
     }
 
-    _programState = desc.programState;
-
     auto* computePipeline = static_cast<ComputePipelineImpl*>(desc.pipeline);
     if (!computePipeline->getPipeline())
         return false;
+
+    _programState = desc.programState;
 
     auto* cmd = _currentCmdList;
     cmd->SetComputeRootSignature(computePipeline->getRootSignature());
@@ -1216,7 +1211,10 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         {
             auto s = allocateUniformSlice(_frameIndex, uboInfo.sizeBytes);
             ::memcpy(s.cpuPtr, cpuBuffer.data() + uboInfo.cpuOffset, uboInfo.sizeBytes);
-            cmd->SetComputeRootConstantBufferView(uboInfo.binding, s.gpuVA);
+            const auto rootIndex = computePipeline->cbvRootIndex(uboInfo.binding);
+            AXASSERT(rootIndex != UINT_MAX, "Missing D3D12 compute CBV root parameter");
+            if (rootIndex != UINT_MAX)
+                cmd->SetComputeRootConstantBufferView(rootIndex, s.gpuVA);
         }
     }
 
@@ -1230,11 +1228,14 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
 
     // Copy SRV descriptors (read-only storage buffers, then textures) in
     // root-signature range order (ComputePipeline12::createRootSignature).
-    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    for (const auto& storageInfo : program->getActiveStorageBufferInfos())
     {
-        if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_ONLY)
+        if (storageInfo.access != BufferAccess::READ_ONLY)
             continue;
-        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        auto binding = storageBindings.find(storageInfo.binding);
+        if (binding == storageBindings.end() || !binding->second.buffer)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(binding->second.buffer);
         bufferImpl->setLastFenceValue(_frameFenceValue);
         auto srvHandle = bufferImpl->getSRV();
         if (!srvHandle)
@@ -1245,8 +1246,13 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
         _device->CopyDescriptorsSimple(1, dst, srvHandle->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         ++slot;
     }
-    for (const auto& [bindingIndex, bindingSet] : desc.programState->getTextureBindingSets())
+    const auto& textureBindings = desc.programState->getTextureBindingSets();
+    for (const auto& [_, textureInfo] : program->getActiveTextureInfos())
     {
+        auto binding = textureBindings.find(textureInfo->location);
+        if (binding == textureBindings.end())
+            continue;
+        const auto& bindingSet = binding->second;
         for (auto tex : bindingSet.texs)
         {
             auto textureImpl = static_cast<TextureImpl*>(tex);
@@ -1264,11 +1270,14 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     const UINT srvCount = slot;
 
     // Copy UAV descriptors (read-write storage buffers).
-    for (const auto& [binding, bindingSet] : desc.programState->getStorageBufferBindingSets())
+    for (const auto& storageInfo : program->getActiveStorageBufferInfos())
     {
-        if (!bindingSet.buffer || bindingSet.access != BufferAccess::READ_WRITE)
+        if (storageInfo.access != BufferAccess::READ_WRITE)
             continue;
-        auto bufferImpl = static_cast<BufferImpl*>(bindingSet.buffer);
+        auto binding = storageBindings.find(storageInfo.binding);
+        if (binding == storageBindings.end() || !binding->second.buffer)
+            continue;
+        auto bufferImpl = static_cast<BufferImpl*>(binding->second.buffer);
         bufferImpl->setLastFenceValue(_frameFenceValue);
         auto uavHandle  = bufferImpl->getUAV();
         if (!uavHandle)
@@ -1301,12 +1310,30 @@ bool GraphicsContextImpl::dispatch(const ComputeDispatchDesc& desc)
     }
     if (computePipeline->customSamplerRootIndex() != UINT_MAX)
     {
-        D3D12_GPU_DESCRIPTOR_HANDLE customGpuHandle;
-        if (computePipeline->customSamplerBatch())
-            customGpuHandle = computePipeline->customSamplerBatch()->gpu;
-        else
-            customGpuHandle = _driver->getSamplerHeap()->GetGPUDescriptorHandleForHeapStart();
-        cmd->SetComputeRootDescriptorTable(computePipeline->customSamplerRootIndex(), customGpuHandle);
+        auto* batch = computePipeline->getCustomSamplerBatch(desc.programState);
+        AXASSERT(batch, "Failed to resolve D3D12 compute custom sampler descriptors");
+        if (batch)
+            cmd->SetComputeRootDescriptorTable(computePipeline->customSamplerRootIndex(), batch->gpu);
+    }
+
+    // A texture uploaded by the regular texture path starts in pixel-shader
+    // read state. Compute sampling needs the non-pixel bit as well, and the
+    // combined state remains valid when the same texture is rendered later.
+    constexpr D3D12_RESOURCE_STATES textureReadState =
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    for (const auto& [binding, bindingSet] : desc.programState->getTextureBindingSets())
+    {
+        for (auto* texture : bindingSet.texs)
+        {
+            if (!texture)
+                continue;
+            auto* textureImpl = static_cast<TextureImpl*>(texture);
+            if (!textureImpl->internalHandle().resource)
+                continue;
+            textureImpl->setLastFenceValue(_frameFenceValue);
+            if (textureImpl->getCurrentState() != textureReadState)
+                textureImpl->transitionState(cmd, textureReadState);
+        }
     }
 
     // Transition storage buffers to their bind state.

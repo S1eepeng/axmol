@@ -87,6 +87,7 @@ struct VulkanCaps
     bool memoryPrioritySupported{false};
     bool geometryShaderSupported{false};
     bool timelineSemaphoreSupported{false};
+    bool computeQueueSupported{false};
 };
 
 class GraphicsDeviceImpl : public GraphicsDevice

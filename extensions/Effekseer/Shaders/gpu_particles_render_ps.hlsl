@@ -1,14 +1,34 @@
 #include "gpu_particles_utils.hlsli"
 
-cbuffer cb0
+// axslcc allocates bindings before preprocessing. These disabled declarations
+// reserve b1/b2, already used by the vertex stage, without creating active
+// fragment resources. The real fragment blocks therefore use b3/b4.
+#if 0
+cbuffer ReservedVSParamSlot
+{
+    uint4 ReservedVSParamData;
+};
+cbuffer ReservedVSEmitterSlot
+{
+    uint4 ReservedVSEmitterData;
+};
+#endif
+
+cbuffer RenderConstantsPS
 {
     RenderConstants constants;
 };
-cbuffer cb1
+cbuffer ParameterDataPS
 {
     ParameterData paramData;
 };
 
+// Likewise reserve resource slots 0/1 so ColorTex and NormalTex retain the
+// Effekseer GPU ABI at t2/t3 when the stages are linked.
+#if 0
+StructuredBuffer<uint> ReservedParticles;
+StructuredBuffer<uint> ReservedTrails;
+#endif
 Texture2D<float4> ColorTex;
 SamplerState ColorSamp;
 Texture2D<float4> NormalTex;

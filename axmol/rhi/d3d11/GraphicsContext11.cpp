@@ -36,6 +36,7 @@
 #include <dxgi1_3.h>
 #include <dxgi1_5.h>
 #include <VersionHelpers.h>
+#include <algorithm>
 #include "axmol/base/Logging.h"
 #include "axmol/platform/Application.h"
 
@@ -837,7 +838,7 @@ void GraphicsContextImpl::prepareDrawing()
             const auto slot  = bindingIndex + k;
             auto textureImpl = static_cast<TextureImpl*>(texs[k]);
             context->PSSetShaderResources(slot, 1, &textureImpl->internalHandle().srv);
-            ++_textureBounds;
+            _textureBounds = (std::max)(_textureBounds, static_cast<UINT>(slot + 1));
         }
     }
 

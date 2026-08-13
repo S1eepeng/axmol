@@ -439,7 +439,7 @@ bool GraphicsDeviceImpl::init()
     _caps.maxComputeWorkGroupSize[2] = 64;
     _caps.maxComputeWorkGroupInvocations = 1024;
     _caps.maxStorageBufferBindings = 31;
-    _caps.maxStorageBufferSize = 256ull * 1024ull * 1024ull;
+    _caps.maxStorageBufferSize = static_cast<size_t>(_mtlDevice.maxBufferLength);
 
     return true;
 }

@@ -27,6 +27,7 @@
 
 #include <vector>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <stdint.h>
 #include <functional>
@@ -165,6 +166,8 @@ public:
      */
     void setUniform(const rhi::UniformLocation& uniformLocation, const void* data, size_t size);
     void setUniformBlock(int binding, const void* data, size_t size);
+    /** Writes an active uniform block selected by shader stage and source block name. */
+    bool setUniformBlock(ShaderStage stage, std::string_view blockName, const void* data, size_t size);
 
     /**
      * Get uniform location in given uniform name.

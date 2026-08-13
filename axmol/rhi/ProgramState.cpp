@@ -332,6 +332,38 @@ void ProgramState::setUniformBlock(int binding, const void* data, size_t size)
     memcpy(_uniformBuffer.data() + it->cpuOffset, data, copySize);
 }
 
+bool ProgramState::setUniformBlock(ShaderStage stage, std::string_view blockName, const void* data, size_t size)
+{
+    if (!data || size == 0 || blockName.empty())
+        return false;
+
+    for (const auto& block : _program->getActiveUniformBlockInfos())
+    {
+        if (block.stage != stage)
+            continue;
+
+        auto reflectedName = block.name;
+        constexpr std::string_view generatedPrefixes[] = {"type_", "type."};
+        for (const auto prefix : generatedPrefixes)
+        {
+            if (reflectedName.starts_with(prefix))
+            {
+                reflectedName.remove_prefix(prefix.size());
+                break;
+            }
+        }
+        if (reflectedName != blockName)
+            continue;
+
+        const auto copySize = (std::min)(size, static_cast<size_t>(block.sizeBytes));
+        assert(block.cpuOffset + copySize <= _uniformBuffer.size());
+        memcpy(_uniformBuffer.data() + block.cpuOffset, data, copySize);
+        return true;
+    }
+
+    return false;
+}
+
 void ProgramState::setTexture(rhi::Texture* texture)
 {
     auto location = getUniformLocation(rhi::Uniform::TEXTURE);

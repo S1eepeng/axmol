@@ -75,6 +75,16 @@ static uint32_t findGraphicsQueueFamily(VkPhysicalDevice physicalDevice)
     std::vector<VkQueueFamilyProperties> qprops(qCount);
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &qCount, qprops.data());
 
+    // Compute work is deliberately submitted on the graphics queue. Prefer a
+    // family that supports both so the regular renderer still works on devices
+    // whose first graphics family is graphics-only.
+    for (uint32_t i = 0; i < qCount; ++i)
+    {
+        constexpr auto required = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+        if (qprops[i].queueCount > 0 && (qprops[i].queueFlags & required) == required)
+            return i;
+    }
+
     for (uint32_t i = 0; i < qCount; ++i)
     {
         if (qprops[i].queueCount > 0 && (qprops[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
@@ -414,6 +424,14 @@ bool GraphicsDeviceImpl::initializeDevice()
     }
 
     VK_VERIFY_EXPR(_physical != VK_NULL_HANDLE && _graphicsQueueFamily != UINT32_MAX, "No available GPU");
+
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(_physical, &queueFamilyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(_physical, &queueFamilyCount, queueFamilyProperties.data());
+    _vkCaps.computeQueueSupported =
+        _graphicsQueueFamily < queueFamilyProperties.size() &&
+        (queueFamilyProperties[_graphicsQueueFamily].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
 
     // Enumerate available device extensions
     uint32_t extCount = 0;
@@ -958,7 +976,7 @@ bool GraphicsDeviceImpl::checkForFeatureSupported(FeatureType feature)
     }
 
     case FeatureType::COMPUTE_SHADER:
-        return _caps.maxComputeWorkGroupInvocations > 0;
+        return _vkCaps.computeQueueSupported && _caps.maxComputeWorkGroupInvocations > 0;
 
     case FeatureType::STORAGE_BUFFER:
         return _caps.maxStorageBufferBindings > 0 && _caps.maxStorageBufferSize > 0;
