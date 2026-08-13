@@ -1030,11 +1030,22 @@ private:
         {
             if (storage.binding < 0 || static_cast<size_t>(storage.binding) >= touchedStorageSlots.size() ||
                 !touchedStorageSlots[storage.binding])
+            {
+                AXLOGE("Effekseer compute storage resource '{}' is not bound (binding={}, access={})", storage.name,
+                       storage.binding, storage.access == ax::rhi::BufferAccess::READ_WRITE ? "read_write" : "read_only");
                 return false;
+            }
             auto binding = storageBindings.find(storage.binding);
             if (binding == storageBindings.end() || !binding->second.buffer ||
                 binding->second.access != storage.access)
+            {
+                AXLOGE("Effekseer compute storage resource '{}' has an invalid binding (binding={}, buffer={}, access={})",
+                       storage.name, storage.binding, binding != storageBindings.end() && binding->second.buffer ? "set" : "null",
+                       binding != storageBindings.end() && binding->second.access == ax::rhi::BufferAccess::READ_WRITE
+                           ? "read_write"
+                           : "read_only");
                 return false;
+            }
         }
 
         const auto& textureBindings = ps->getTextureBindingSets();
@@ -1042,13 +1053,24 @@ private:
         {
             if (texture->location < 0 || static_cast<size_t>(texture->location) >= touchedTextureSlots.size() ||
                 !touchedTextureSlots[texture->location])
+            {
+                AXLOGE("Effekseer compute texture '{}' is not bound (binding={})", _, texture->location);
                 return false;
+            }
             auto binding = textureBindings.find(texture->location);
             if (binding == textureBindings.end() || binding->second.texs.size() != texture->count)
+            {
+                AXLOGE("Effekseer compute texture '{}' has an invalid binding (binding={}, expected={}, actual={})", _,
+                       texture->location, texture->count,
+                       binding == textureBindings.end() ? 0 : binding->second.texs.size());
                 return false;
+            }
             if (std::any_of(binding->second.texs.begin(), binding->second.texs.end(),
                             [](const ax::rhi::Texture* value) { return value == nullptr; }))
+            {
+                AXLOGE("Effekseer compute texture '{}' contains a null texture (binding={})", _, texture->location);
                 return false;
+            }
         }
 
         return true;
