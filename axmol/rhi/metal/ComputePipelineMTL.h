@@ -26,7 +26,7 @@
 #include "axmol/rhi/ComputePipeline.h"
 #include <Metal/Metal.h>
 
-namespace ax::rhi::metal
+namespace ax::rhi::mtl
 {
 class ProgramImpl;
 

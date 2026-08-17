@@ -25,6 +25,7 @@
 #pragma once
 
 #include "axmol/rhi/Program.h"
+#include "axmol/rhi/metal/ShaderModuleMTL.h"
 #import <Metal/Metal.h>
 
 namespace ax::rhi::mtl

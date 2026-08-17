@@ -25,7 +25,7 @@
 #include "axmol/rhi/metal/ProgramMTL.h"
 #include "axmol/base/Logging.h"
 
-namespace ax::rhi::metal
+namespace ax::rhi::mtl
 {
 
 ComputePipelineImpl::ComputePipelineImpl(id<MTLDevice> mtlDevice, ProgramImpl* program)

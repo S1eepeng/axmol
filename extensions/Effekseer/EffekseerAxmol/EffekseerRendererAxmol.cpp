@@ -970,7 +970,7 @@ private:
             auto& binder = binders[slot];
             if (auto* sb = std::get_if<Effekseer::Backend::StorageBufferBinder>(&binder))
             {
-                auto sbb = sb->StorageBuffer.DownCast<StorageBufferAX>();
+                auto sbb = sb->StorageBuffer.template DownCast<StorageBufferAX>();
                 if (sbb && sbb->get())
                 {
                     ps->setStorageBuffer(static_cast<int>(slot), sbb->get(),
@@ -982,7 +982,7 @@ private:
             }
             else if (auto* tb = std::get_if<Effekseer::Backend::TextureBinder>(&binder))
             {
-                auto tex = tb->Texture.DownCast<TextureAX>();
+                auto tex = tb->Texture.template DownCast<TextureAX>();
                 if (!tex || !tex->get())
                     continue;
 
