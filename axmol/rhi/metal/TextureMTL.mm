@@ -265,11 +265,15 @@ void TextureImpl::ensureNativeTexture()
                                                                        mipmapped:needMipmaps];
         break;
     case TextureType::TEXTURE_3D:
-        textureDesc = [MTLTextureDescriptor texture3DDescriptorWithPixelFormat:pixelFormat
+        // MTLTextureDescriptor has no texture3DDescriptorWithPixelFormat
+        // convenience method; create a 2D descriptor and promote it to a 3D
+        // texture via the mutable textureType/depth properties.
+        textureDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
                                                                          width:_desc.width
                                                                         height:_desc.height
-                                                                         depth:_desc.depth
-                                                                      mipmapped:needMipmaps];
+                                                                     mipmapped:needMipmaps];
+        textureDesc.textureType = MTLTextureType3D;
+        textureDesc.depth       = _desc.depth;
         if (_desc.mipLevels > 1)
             textureDesc.mipmapLevelCount = _desc.mipLevels;
         break;

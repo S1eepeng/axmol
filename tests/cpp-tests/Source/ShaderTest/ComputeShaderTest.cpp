@@ -198,7 +198,9 @@ void ComputeDispatchTest::setupDrawCommand(ax::Renderer* renderer)
     } cb{};
     cb.mvp[0] = cb.mvp[5] = cb.mvp[10] = cb.mvp[15] = 1.0f;
     cb.colorCount = kColorCount;
-    _renderState->setUniformBlock(0, &cb, sizeof(cb));
+    // Match by name: on Metal, axslcc shifts the UBO binding past the storage
+    // buffer slot (0), so the integer-binding overload would silently fail.
+    _renderState->setUniformBlock(rhi::ShaderStage::VERTEX, "VSConstants", &cb, sizeof(cb));
 
     _drawCommand.init(0.0f);
     _drawCommand.setOwnPSVL(_renderState, _vertexLayout);
