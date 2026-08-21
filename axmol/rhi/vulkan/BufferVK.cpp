@@ -167,8 +167,13 @@ static inline size_t alignTo(size_t value, size_t alignment)
 }
 
 /* -------------------------------------------------- ctor */
-BufferImpl::BufferImpl(GraphicsDeviceImpl* driver, size_t size, BufferType type, BufferUsage usage, const void* initial)
-    : Buffer(size, type, usage), _driver(driver)
+BufferImpl::BufferImpl(GraphicsDeviceImpl* driver,
+                       size_t size,
+                       BufferType type,
+                       BufferUsage usage,
+                       const void* initial,
+                       uint32_t stride)
+    : Buffer(size, type, usage, stride), _driver(driver)
 {
     translateUsage(usage, _usageFlags, _memoryProperties);
     _usageFlags |= translateBindFlag(type);

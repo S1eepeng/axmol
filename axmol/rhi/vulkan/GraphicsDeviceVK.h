@@ -114,6 +114,7 @@ public:
 
     GraphicsContext* createGraphicsContext(SurfaceHandle surface) override;
     Buffer* createBuffer(size_t size, BufferType type, BufferUsage usage, const void* initial) override;
+    Buffer* createBuffer(const BufferDesc& desc, const void* initial) override;
     Texture* createTexture(const TextureDesc& descriptor, std::optional<Color> clearColorHint = std::nullopt) override;
     Texture* createTextureFromNativeHandle(const ExternalTextureDesc& descriptor) override;
     RenderTarget* createRenderTarget(Texture* colorAttachment, Texture* depthStencilAttachment) override;

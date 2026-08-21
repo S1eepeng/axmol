@@ -753,6 +753,11 @@ Buffer* GraphicsDeviceImpl::createBuffer(size_t size, BufferType type, BufferUsa
     return new BufferImpl(this, size, type, usage, initial);
 }
 
+Buffer* GraphicsDeviceImpl::createBuffer(const BufferDesc& desc, const void* initial)
+{
+    return new BufferImpl(this, desc.size, desc.type, desc.usage, initial, desc.stride);
+}
+
 Texture* GraphicsDeviceImpl::createTexture(const TextureDesc& descriptor, std::optional<Color>)
 {
     return new TextureImpl(this, descriptor);

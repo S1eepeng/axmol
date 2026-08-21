@@ -72,7 +72,7 @@ public:
     const DescriptorHandle* getCustomSamplerBatch(const ::ax::rhi::ProgramState* programState);
 
 private:
-    void createRootSignature(ProgramImpl* program);
+    bool createRootSignature(ProgramImpl* program);
     void createPipeline(ProgramImpl* program);
 
     GraphicsDeviceImpl* _driver{nullptr};

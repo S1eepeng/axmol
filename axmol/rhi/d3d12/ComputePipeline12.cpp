@@ -27,6 +27,7 @@
 #include "axmol/rhi/ProgramState.h"
 #include "axmol/rhi/SamplerRegistry.h"
 #include "axmol/base/Logging.h"
+#include <string_view>
 
 namespace ax::rhi::d3d12
 {
@@ -34,8 +35,8 @@ namespace ax::rhi::d3d12
 ComputePipelineImpl::ComputePipelineImpl(GraphicsDeviceImpl* driver, ProgramImpl* program) : _driver(driver)
 {
     setProgram(program);
-    createRootSignature(program);
-    createPipeline(program);
+    if (createRootSignature(program))
+        createPipeline(program);
 }
 
 ComputePipelineImpl::~ComputePipelineImpl()
@@ -44,7 +45,7 @@ ComputePipelineImpl::~ComputePipelineImpl()
         _driver->getSamplerAllocator()->deallocateBatch(batch, _customSamplerBatchCount);
 }
 
-void ComputePipelineImpl::createRootSignature(ProgramImpl* program)
+bool ComputePipelineImpl::createRootSignature(ProgramImpl* program)
 {
     tlx::pod_vector<D3D12_ROOT_PARAMETER> rootParams;
     rootParams.reserve(6);
@@ -176,10 +177,24 @@ void ComputePipelineImpl::createRootSignature(ProgramImpl* program)
 
     Microsoft::WRL::ComPtr<ID3DBlob> sigBlob, errBlob;
     HRESULT hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sigBlob, &errBlob);
-    AXASSERT(SUCCEEDED(hr), "Failed to serialize compute root signature");
+    if (FAILED(hr) || !sigBlob)
+    {
+        const std::string_view detail =
+            errBlob ? std::string_view(static_cast<const char*>(errBlob->GetBufferPointer()), errBlob->GetBufferSize())
+                    : std::string_view("unknown serialization error");
+        AXLOGE("Failed to serialize compute root signature, hr:{}, {}", hr, detail);
+        AXASSERT(false, "Failed to serialize compute root signature");
+        return false;
+    }
+
     hr = _driver->getDevice()->CreateRootSignature(0, sigBlob->GetBufferPointer(), sigBlob->GetBufferSize(),
                                                    IID_PPV_ARGS(&_rootSig));
-    AXASSERT(SUCCEEDED(hr), "Failed to create compute root signature");
+    if (FAILED(hr) || !_rootSig)
+    {
+        AXLOGE("Failed to create compute root signature, hr:{}", hr);
+        AXASSERT(false, "Failed to create compute root signature");
+        return false;
+    }
 
     uint32_t customSamplerCount = 0;
     for (const auto& smp : program->getActiveSamplerInfos())
@@ -188,6 +203,7 @@ void ComputePipelineImpl::createRootSignature(ProgramImpl* program)
             customSamplerCount += smp.count;
     }
     _customSamplerBatchCount = customSamplerCount;
+    return true;
 }
 
 const DescriptorHandle* ComputePipelineImpl::getCustomSamplerBatch(const ::ax::rhi::ProgramState* programState)

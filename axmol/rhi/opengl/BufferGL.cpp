@@ -49,7 +49,8 @@ GLenum toGLUsage(const BufferUsage& usage)
 }
 }  // namespace
 
-BufferImpl::BufferImpl(size_t size, BufferType type, BufferUsage usage, const void* initial) : Buffer(size, type, usage)
+BufferImpl::BufferImpl(size_t size, BufferType type, BufferUsage usage, const void* initial, uint32_t stride)
+    : Buffer(size, type, usage, stride)
 {
     glGenBuffers(1, &_buffer);
 
