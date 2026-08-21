@@ -33,10 +33,12 @@ int lua_register_ax_rhi_BufferType(lua_State* tolua_S)
         tolua_constant(tolua_S, "ELEMENT_ARRAY_BUFFER", 1);
         tolua_constant(tolua_S, "UNIFORM_BUFFER", 2);
         tolua_constant(tolua_S, "PIXEL_PACK_BUFFER", 3);
-        tolua_constant(tolua_S, "COUNT", 4);
+        tolua_constant(tolua_S, "STORAGE_BUFFER", 4);
+        tolua_constant(tolua_S, "COUNT", 5);
         tolua_constant(tolua_S, "VERTEX", 0);
         tolua_constant(tolua_S, "INDEX", 1);
         tolua_constant(tolua_S, "UNIFORM", 2);
+        tolua_constant(tolua_S, "STORAGE", 4);
     tolua_endmodule(tolua_S);
 
     auto typeName = typeid(ax::rhi::BufferType).name(); // rtti is literal storage
@@ -253,6 +255,7 @@ int lua_register_ax_rhi_TextureType(lua_State* tolua_S)
     tolua_beginmodule(tolua_S,"TextureType");
         tolua_constant(tolua_S, "TEXTURE_2D", 0);
         tolua_constant(tolua_S, "TEXTURE_CUBE", 1);
+        tolua_constant(tolua_S, "TEXTURE_3D", 2);
     tolua_endmodule(tolua_S);
 
     auto typeName = typeid(ax::rhi::TextureType).name(); // rtti is literal storage
@@ -468,6 +471,56 @@ int lua_ax_rhi_ShaderCache_acquireFragmentShaderModule(lua_State* tolua_S)
 
     return 0;
 }
+int lua_ax_rhi_ShaderCache_acquireComputeShaderModule(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::ShaderCache* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.ShaderCache",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::ShaderCache*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_ShaderCache_acquireComputeShaderModule'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 1)
+    {
+        ax::Data arg0;
+
+        luaL_error(tolua_S, "ax::Data unsupported");;
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_ShaderCache_acquireComputeShaderModule'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->acquireComputeShaderModule(arg0);
+        object_to_luaval<ax::rhi::ShaderModule>(tolua_S, "axr.ShaderModule",(ax::rhi::ShaderModule*)ret);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.ShaderCache:acquireComputeShaderModule",argc, 1);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_ShaderCache_acquireComputeShaderModule'.",&tolua_err);
+#endif
+
+    return 0;
+}
 int lua_ax_rhi_ShaderCache_removeUnusedShader(lua_State* tolua_S)
 {
     int argc = 0;
@@ -598,6 +651,7 @@ int lua_register_ax_rhi_ShaderCache(lua_State* tolua_S)
         tolua_function(tolua_S,"removeAllShaders",lua_ax_rhi_ShaderCache_removeAllShaders);
         tolua_function(tolua_S,"acquireVertexShaderModule",lua_ax_rhi_ShaderCache_acquireVertexShaderModule);
         tolua_function(tolua_S,"acquireFragmentShaderModule",lua_ax_rhi_ShaderCache_acquireFragmentShaderModule);
+        tolua_function(tolua_S,"acquireComputeShaderModule",lua_ax_rhi_ShaderCache_acquireComputeShaderModule);
         tolua_function(tolua_S,"removeUnusedShader",lua_ax_rhi_ShaderCache_removeUnusedShader);
         tolua_function(tolua_S,"getInstance", lua_ax_rhi_ShaderCache_getInstance);
         tolua_function(tolua_S,"destroyInstance", lua_ax_rhi_ShaderCache_destroyInstance);
@@ -706,6 +760,150 @@ int lua_ax_rhi_Program_getUniformBufferSize(lua_State* tolua_S)
 #if _AX_DEBUG >= 1
     tolua_lerror:
     tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_Program_getUniformBufferSize'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_Program_getSamplerLocation(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::Program* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.Program",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::Program*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_Program_getSamplerLocation'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 1)
+    {
+        std::string_view arg0;
+
+        ok &= luaval_to_std_string_view(tolua_S, 2,&arg0, "axr.Program:getSamplerLocation");
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_Program_getSamplerLocation'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getSamplerLocation(arg0);
+        #pragma warning NO CONVERSION FROM NATIVE FOR SamplerLocation;
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.Program:getSamplerLocation",argc, 1);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_Program_getSamplerLocation'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_Program_getActiveStorageBufferInfos(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::Program* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.Program",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::Program*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_Program_getActiveStorageBufferInfos'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 0)
+    {
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_Program_getActiveStorageBufferInfos'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getActiveStorageBufferInfos();
+        object_to_luaval<std::vector<ax::rhi::StorageBufferInfo>&>(tolua_S, "std::vector<ax::rhi::StorageBufferInfo>",(std::vector<ax::rhi::StorageBufferInfo>&)ret);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.Program:getActiveStorageBufferInfos",argc, 0);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_Program_getActiveStorageBufferInfos'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_Program_getComputeLocalSize(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::Program* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.Program",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::Program*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_Program_getComputeLocalSize'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 0)
+    {
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_Program_getComputeLocalSize'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getComputeLocalSize();
+        #pragma warning NO CONVERSION FROM NATIVE FOR array;
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.Program:getComputeLocalSize",argc, 0);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_Program_getComputeLocalSize'.",&tolua_err);
 #endif
 
     return 0;
@@ -945,6 +1143,53 @@ int lua_ax_rhi_Program_getFSModule(lua_State* tolua_S)
 
     return 0;
 }
+int lua_ax_rhi_Program_getCSModule(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::Program* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.Program",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::Program*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_Program_getCSModule'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 0)
+    {
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_Program_getCSModule'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getCSModule();
+        object_to_luaval<ax::rhi::ShaderModule>(tolua_S, "axr.ShaderModule",(ax::rhi::ShaderModule*)ret);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.Program:getCSModule",argc, 0);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_Program_getCSModule'.",&tolua_err);
+#endif
+
+    return 0;
+}
 int lua_ax_rhi_Program_isValid(lua_State* tolua_S)
 {
     int argc = 0;
@@ -1006,11 +1251,15 @@ int lua_register_ax_rhi_Program(lua_State* tolua_S)
     tolua_beginmodule(tolua_S,"Program");
         tolua_function(tolua_S,"getUniformLocation",lua_ax_rhi_Program_getUniformLocation);
         tolua_function(tolua_S,"getUniformBufferSize",lua_ax_rhi_Program_getUniformBufferSize);
+        tolua_function(tolua_S,"getSamplerLocation",lua_ax_rhi_Program_getSamplerLocation);
+        tolua_function(tolua_S,"getActiveStorageBufferInfos",lua_ax_rhi_Program_getActiveStorageBufferInfos);
+        tolua_function(tolua_S,"getComputeLocalSize",lua_ax_rhi_Program_getComputeLocalSize);
         tolua_function(tolua_S,"getProgramType",lua_ax_rhi_Program_getProgramType);
         tolua_function(tolua_S,"getProgramId",lua_ax_rhi_Program_getProgramId);
         tolua_function(tolua_S,"getVertexLayout",lua_ax_rhi_Program_getVertexLayout);
         tolua_function(tolua_S,"getVSModule",lua_ax_rhi_Program_getVSModule);
         tolua_function(tolua_S,"getFSModule",lua_ax_rhi_Program_getFSModule);
+        tolua_function(tolua_S,"getCSModule",lua_ax_rhi_Program_getCSModule);
         tolua_function(tolua_S,"isValid",lua_ax_rhi_Program_isValid);
     tolua_endmodule(tolua_S);
     auto typeName = typeid(ax::rhi::Program).name(); // rtti is literal storage
@@ -1223,6 +1472,287 @@ int lua_ax_rhi_ProgramState_setTexture(lua_State* tolua_S)
 #if _AX_DEBUG >= 1
     tolua_lerror:
     tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_ProgramState_setTexture'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_ProgramState_setStorageBuffer(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::ProgramState* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.ProgramState",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::ProgramState*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_ProgramState_setStorageBuffer'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 2)
+    {
+        int arg0;
+        ax::rhi::Buffer* arg1;
+
+        ok &= luaval_to_int(tolua_S, 2, &arg0, "axr.ProgramState:setStorageBuffer");
+
+        ok &= luaval_to_object<ax::rhi::Buffer>(tolua_S, 3, "axr.Buffer",&arg1, "axr.ProgramState:setStorageBuffer");
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_ProgramState_setStorageBuffer'", nullptr);
+            return 0;
+        }
+        obj->setStorageBuffer(arg0, arg1);
+        lua_settop(tolua_S, 1);
+        return 1;
+    }
+    if (argc == 3)
+    {
+        int arg0;
+        ax::rhi::Buffer* arg1;
+        ax::rhi::BufferAccess arg2;
+
+        ok &= luaval_to_int(tolua_S, 2, &arg0, "axr.ProgramState:setStorageBuffer");
+
+        ok &= luaval_to_object<ax::rhi::Buffer>(tolua_S, 3, "axr.Buffer",&arg1, "axr.ProgramState:setStorageBuffer");
+
+        ok &= luaval_to_int(tolua_S, 4, &arg2, "axr.ProgramState:setStorageBuffer");
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_ProgramState_setStorageBuffer'", nullptr);
+            return 0;
+        }
+        obj->setStorageBuffer(arg0, arg1, arg2);
+        lua_settop(tolua_S, 1);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.ProgramState:setStorageBuffer",argc, 2);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_ProgramState_setStorageBuffer'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_ProgramState_setSampler(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::ProgramState* obj = nullptr;
+    bool ok  = true;
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.ProgramState",0,&tolua_err)) goto tolua_lerror;
+#endif
+    obj = (ax::rhi::ProgramState*)tolua_tousertype(tolua_S,1,0);
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_ProgramState_setSampler'", nullptr);
+        return 0;
+    }
+#endif
+    argc = lua_gettop(tolua_S)-1;
+    do {
+        if (argc == 2) {
+            std::string_view arg0;
+            ok &= luaval_to_std_string_view(tolua_S, 2,&arg0, "axr.ProgramState:setSampler");
+
+            if (!ok) { break; }
+            ax::rhi::SamplerDesc arg1;
+            ok &= luaval_to_samplerDesc(tolua_S, 3, arg1, "axr.ProgramState:setSampler");
+
+            if (!ok) { break; }
+            obj->setSampler(arg0, arg1);
+            lua_settop(tolua_S, 1);
+            return 1;
+        }
+    }while(0);
+    ok  = true;
+    do {
+        if (argc == 2) {
+            ax::rhi::SamplerLocation arg0;
+            #pragma warning NO CONVERSION TO NATIVE FOR SamplerLocation
+        ok = false;
+
+            if (!ok) { break; }
+            ax::rhi::SamplerDesc arg1;
+            ok &= luaval_to_samplerDesc(tolua_S, 3, arg1, "axr.ProgramState:setSampler");
+
+            if (!ok) { break; }
+            obj->setSampler(arg0, arg1);
+            lua_settop(tolua_S, 1);
+            return 1;
+        }
+    }while(0);
+    ok  = true;
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n",  "axr.ProgramState:setSampler",argc, 2);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_ProgramState_setSampler'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_ProgramState_getStorageBufferBindingSets(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::ProgramState* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.ProgramState",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::ProgramState*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_ProgramState_getStorageBufferBindingSets'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 0)
+    {
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_ProgramState_getStorageBufferBindingSets'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getStorageBufferBindingSets();
+        object_to_luaval<std::unordered_map<int, ax::rhi::StorageBufferBindingSet>&>(tolua_S, "std::unordered_map<int, ax::rhi::StorageBufferBindingSet>",(std::unordered_map<int, ax::rhi::StorageBufferBindingSet>&)ret);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.ProgramState:getStorageBufferBindingSets",argc, 0);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_ProgramState_getStorageBufferBindingSets'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_ProgramState_getSamplerOverrides(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::ProgramState* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.ProgramState",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::ProgramState*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_ProgramState_getSamplerOverrides'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 0)
+    {
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_ProgramState_getSamplerOverrides'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getSamplerOverrides();
+        object_to_luaval<std::unordered_map<int, ax::rhi::SamplerId>&>(tolua_S, "std::unordered_map<int, ax::rhi::SamplerId>",(std::unordered_map<int, ax::rhi::SamplerId>&)ret);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.ProgramState:getSamplerOverrides",argc, 0);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_ProgramState_getSamplerOverrides'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_ProgramState_getSamplerOverride(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::ProgramState* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.ProgramState",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::ProgramState*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_ProgramState_getSamplerOverride'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 1)
+    {
+        int arg0;
+
+        ok &= luaval_to_int(tolua_S, 2, &arg0, "axr.ProgramState:getSamplerOverride");
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_ProgramState_getSamplerOverride'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getSamplerOverride(arg0);
+        #pragma warning NO CONVERSION FROM NATIVE FOR SamplerId;
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.ProgramState:getSamplerOverride",argc, 1);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_ProgramState_getSamplerOverride'.",&tolua_err);
 #endif
 
     return 0;
@@ -1525,6 +2055,11 @@ int lua_register_ax_rhi_ProgramState(lua_State* tolua_S)
         tolua_function(tolua_S,"getProgram",lua_ax_rhi_ProgramState_getProgram);
         tolua_function(tolua_S,"getVertexInputDesc",lua_ax_rhi_ProgramState_getVertexInputDesc);
         tolua_function(tolua_S,"setTexture",lua_ax_rhi_ProgramState_setTexture);
+        tolua_function(tolua_S,"setStorageBuffer",lua_ax_rhi_ProgramState_setStorageBuffer);
+        tolua_function(tolua_S,"setSampler",lua_ax_rhi_ProgramState_setSampler);
+        tolua_function(tolua_S,"getStorageBufferBindingSets",lua_ax_rhi_ProgramState_getStorageBufferBindingSets);
+        tolua_function(tolua_S,"getSamplerOverrides",lua_ax_rhi_ProgramState_getSamplerOverrides);
+        tolua_function(tolua_S,"getSamplerOverride",lua_ax_rhi_ProgramState_getSamplerOverride);
         tolua_function(tolua_S,"setParameterAutoBinding",lua_ax_rhi_ProgramState_setParameterAutoBinding);
         tolua_function(tolua_S,"getBuiltinVertexLayout",lua_ax_rhi_ProgramState_getBuiltinVertexLayout);
         tolua_function(tolua_S,"getBatchId",lua_ax_rhi_ProgramState_getBatchId);
@@ -1869,6 +2404,53 @@ int lua_ax_rhi_Texture_getHeight(lua_State* tolua_S)
 
     return 0;
 }
+int lua_ax_rhi_Texture_getDepth(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::Texture* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.Texture",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::Texture*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_Texture_getDepth'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 0)
+    {
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_Texture_getDepth'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getDepth();
+        tolua_pushnumber(tolua_S,(lua_Number)ret);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.Texture:getDepth",argc, 0);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_Texture_getDepth'.",&tolua_err);
+#endif
+
+    return 0;
+}
 int lua_ax_rhi_Texture_getArraySize(lua_State* tolua_S)
 {
     int argc = 0;
@@ -2161,6 +2743,141 @@ int lua_ax_rhi_Texture_updateSubData(lua_State* tolua_S)
 
     return 0;
 }
+int lua_ax_rhi_Texture_updateData3D(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::Texture* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.Texture",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::Texture*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_Texture_updateData3D'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 5)
+    {
+        const void* arg0;
+        int arg1;
+        int arg2;
+        int arg3;
+        int arg4;
+
+        #pragma warning NO CONVERSION TO NATIVE FOR void*
+        ok = false;
+
+        ok &= luaval_to_int(tolua_S, 3, &arg1, "axr.Texture:updateData3D");
+
+        ok &= luaval_to_int(tolua_S, 4, &arg2, "axr.Texture:updateData3D");
+
+        ok &= luaval_to_int(tolua_S, 5, &arg3, "axr.Texture:updateData3D");
+
+        ok &= luaval_to_int(tolua_S, 6, &arg4, "axr.Texture:updateData3D");
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_Texture_updateData3D'", nullptr);
+            return 0;
+        }
+        obj->updateData3D(arg0, arg1, arg2, arg3, arg4);
+        lua_settop(tolua_S, 1);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.Texture:updateData3D",argc, 5);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_Texture_updateData3D'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_Texture_updateSubData3D(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::Texture* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.Texture",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::Texture*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_Texture_updateSubData3D'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 8)
+    {
+        int arg0;
+        int arg1;
+        int arg2;
+        int arg3;
+        int arg4;
+        int arg5;
+        int arg6;
+        const void* arg7;
+
+        ok &= luaval_to_int(tolua_S, 2, &arg0, "axr.Texture:updateSubData3D");
+
+        ok &= luaval_to_int(tolua_S, 3, &arg1, "axr.Texture:updateSubData3D");
+
+        ok &= luaval_to_int(tolua_S, 4, &arg2, "axr.Texture:updateSubData3D");
+
+        ok &= luaval_to_int(tolua_S, 5, &arg3, "axr.Texture:updateSubData3D");
+
+        ok &= luaval_to_int(tolua_S, 6, &arg4, "axr.Texture:updateSubData3D");
+
+        ok &= luaval_to_int(tolua_S, 7, &arg5, "axr.Texture:updateSubData3D");
+
+        ok &= luaval_to_int(tolua_S, 8, &arg6, "axr.Texture:updateSubData3D");
+
+        #pragma warning NO CONVERSION TO NATIVE FOR void*
+        ok = false;
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_Texture_updateSubData3D'", nullptr);
+            return 0;
+        }
+        obj->updateSubData3D(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+        lua_settop(tolua_S, 1);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.Texture:updateSubData3D",argc, 8);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_Texture_updateSubData3D'.",&tolua_err);
+#endif
+
+    return 0;
+}
 int lua_ax_rhi_Texture_updateCompressedSubData(lua_State* tolua_S)
 {
     int argc = 0;
@@ -2367,11 +3084,14 @@ int lua_register_ax_rhi_Texture(lua_State* tolua_S)
         tolua_function(tolua_S,"hasMipmaps",lua_ax_rhi_Texture_hasMipmaps);
         tolua_function(tolua_S,"getWidth",lua_ax_rhi_Texture_getWidth);
         tolua_function(tolua_S,"getHeight",lua_ax_rhi_Texture_getHeight);
+        tolua_function(tolua_S,"getDepth",lua_ax_rhi_Texture_getDepth);
         tolua_function(tolua_S,"getArraySize",lua_ax_rhi_Texture_getArraySize);
         tolua_function(tolua_S,"getMipLevels",lua_ax_rhi_Texture_getMipLevels);
         tolua_function(tolua_S,"updateData",lua_ax_rhi_Texture_updateData);
         tolua_function(tolua_S,"updateCompressedData",lua_ax_rhi_Texture_updateCompressedData);
         tolua_function(tolua_S,"updateSubData",lua_ax_rhi_Texture_updateSubData);
+        tolua_function(tolua_S,"updateData3D",lua_ax_rhi_Texture_updateData3D);
+        tolua_function(tolua_S,"updateSubData3D",lua_ax_rhi_Texture_updateSubData3D);
         tolua_function(tolua_S,"updateCompressedSubData",lua_ax_rhi_Texture_updateCompressedSubData);
         tolua_function(tolua_S,"updateFaceData",lua_ax_rhi_Texture_updateFaceData);
         tolua_function(tolua_S,"shouldGenMipmaps",lua_ax_rhi_Texture_shouldGenMipmaps);
@@ -2719,6 +3439,56 @@ int lua_ax_rhi_GraphicsDevice_createRenderTarget(lua_State* tolua_S)
 
     return 0;
 }
+int lua_ax_rhi_GraphicsDevice_createComputePipeline(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::GraphicsDevice* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.GraphicsDevice",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::GraphicsDevice*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_GraphicsDevice_createComputePipeline'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 1)
+    {
+        ax::rhi::Program* arg0;
+
+        ok &= luaval_to_object<ax::rhi::Program>(tolua_S, 2, "axr.Program",&arg0, "axr.GraphicsDevice:createComputePipeline");
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_GraphicsDevice_createComputePipeline'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->createComputePipeline(arg0);
+        object_to_luaval<ax::rhi::ComputePipeline>(tolua_S, "axr.ComputePipeline",(ax::rhi::ComputePipeline*)ret);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.GraphicsDevice:createComputePipeline",argc, 1);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_GraphicsDevice_createComputePipeline'.",&tolua_err);
+#endif
+
+    return 0;
+}
 int lua_ax_rhi_GraphicsDevice_createProgram(lua_State* tolua_S)
 {
     int argc = 0;
@@ -2768,6 +3538,56 @@ int lua_ax_rhi_GraphicsDevice_createProgram(lua_State* tolua_S)
 #if _AX_DEBUG >= 1
     tolua_lerror:
     tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_GraphicsDevice_createProgram'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_GraphicsDevice_createComputeProgram(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::GraphicsDevice* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.GraphicsDevice",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::GraphicsDevice*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_GraphicsDevice_createComputeProgram'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 1)
+    {
+        ax::Data arg0;
+
+        luaL_error(tolua_S, "ax::Data unsupported");;
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_GraphicsDevice_createComputeProgram'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->createComputeProgram(arg0);
+        object_to_luaval<ax::rhi::Program>(tolua_S, "axr.Program",(ax::rhi::Program*)ret);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.GraphicsDevice:createComputeProgram",argc, 1);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_GraphicsDevice_createComputeProgram'.",&tolua_err);
 #endif
 
     return 0;
@@ -3342,6 +4162,100 @@ int lua_ax_rhi_GraphicsDevice_getMaxSamplesAllowed(lua_State* tolua_S)
 
     return 0;
 }
+int lua_ax_rhi_GraphicsDevice_getMaxTexture3DSize(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::GraphicsDevice* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.GraphicsDevice",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::GraphicsDevice*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_GraphicsDevice_getMaxTexture3DSize'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 0)
+    {
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_GraphicsDevice_getMaxTexture3DSize'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getMaxTexture3DSize();
+        tolua_pushnumber(tolua_S,(lua_Number)ret);
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.GraphicsDevice:getMaxTexture3DSize",argc, 0);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_GraphicsDevice_getMaxTexture3DSize'.",&tolua_err);
+#endif
+
+    return 0;
+}
+int lua_ax_rhi_GraphicsDevice_getCaps(lua_State* tolua_S)
+{
+    int argc = 0;
+    ax::rhi::GraphicsDevice* obj = nullptr;
+    bool ok  = true;
+
+#if _AX_DEBUG >= 1
+    tolua_Error tolua_err;
+#endif
+
+
+#if _AX_DEBUG >= 1
+    if (!tolua_isusertype(tolua_S,1,"axr.GraphicsDevice",0,&tolua_err)) goto tolua_lerror;
+#endif
+
+    obj = (ax::rhi::GraphicsDevice*)tolua_tousertype(tolua_S,1,0);
+
+#if _AX_DEBUG >= 1
+    if (!obj)
+    {
+        tolua_error(tolua_S,"invalid 'obj' in function 'lua_ax_rhi_GraphicsDevice_getCaps'", nullptr);
+        return 0;
+    }
+#endif
+
+    argc = lua_gettop(tolua_S)-1;
+    if (argc == 0)
+    {
+        if(!ok)
+        {
+            tolua_error(tolua_S,"invalid arguments in function 'lua_ax_rhi_GraphicsDevice_getCaps'", nullptr);
+            return 0;
+        }
+        auto&& ret = obj->getCaps();
+        #pragma warning NO CONVERSION FROM NATIVE FOR DriverCaps;
+        return 1;
+    }
+    luaL_error(tolua_S, "%s has wrong number of arguments: %d, was expecting %d \n", "axr.GraphicsDevice:getCaps",argc, 0);
+    return 0;
+
+#if _AX_DEBUG >= 1
+    tolua_lerror:
+    tolua_error(tolua_S,"#ferror in function 'lua_ax_rhi_GraphicsDevice_getCaps'.",&tolua_err);
+#endif
+
+    return 0;
+}
 int lua_ax_rhi_GraphicsDevice_destroyStaleResources(lua_State* tolua_S)
 {
     int argc = 0;
@@ -3449,7 +4363,9 @@ int lua_register_ax_rhi_GraphicsDevice(lua_State* tolua_S)
 
     tolua_beginmodule(tolua_S,"GraphicsDevice");
         tolua_function(tolua_S,"createRenderTarget",lua_ax_rhi_GraphicsDevice_createRenderTarget);
+        tolua_function(tolua_S,"createComputePipeline",lua_ax_rhi_GraphicsDevice_createComputePipeline);
         tolua_function(tolua_S,"createProgram",lua_ax_rhi_GraphicsDevice_createProgram);
+        tolua_function(tolua_S,"createComputeProgram",lua_ax_rhi_GraphicsDevice_createComputeProgram);
         tolua_function(tolua_S,"resetState",lua_ax_rhi_GraphicsDevice_resetState);
         tolua_function(tolua_S,"getVendor",lua_ax_rhi_GraphicsDevice_getVendor);
         tolua_function(tolua_S,"getRenderer",lua_ax_rhi_GraphicsDevice_getRenderer);
@@ -3462,6 +4378,8 @@ int lua_register_ax_rhi_GraphicsDevice(lua_State* tolua_S)
         tolua_function(tolua_S,"getMaxAttributes",lua_ax_rhi_GraphicsDevice_getMaxAttributes);
         tolua_function(tolua_S,"getMaxTextureUnits",lua_ax_rhi_GraphicsDevice_getMaxTextureUnits);
         tolua_function(tolua_S,"getMaxSamplesAllowed",lua_ax_rhi_GraphicsDevice_getMaxSamplesAllowed);
+        tolua_function(tolua_S,"getMaxTexture3DSize",lua_ax_rhi_GraphicsDevice_getMaxTexture3DSize);
+        tolua_function(tolua_S,"getCaps",lua_ax_rhi_GraphicsDevice_getCaps);
         tolua_function(tolua_S,"destroyStaleResources",lua_ax_rhi_GraphicsDevice_destroyStaleResources);
         tolua_function(tolua_S,"waitForGPU",lua_ax_rhi_GraphicsDevice_waitForGPU);
     tolua_endmodule(tolua_S);
