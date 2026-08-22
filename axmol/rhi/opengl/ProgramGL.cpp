@@ -230,30 +230,34 @@ void ProgramImpl::compileProgram()
                                   &blockIndex);
             if (blockIndex != -1)
             {  // member of uniform block
-                auto blockInfo = blockInfoMap[blockIndex];
+                const auto blockInfoIt = blockInfoMap.find(blockIndex);
+                if (blockInfoIt == blockInfoMap.end() || blockInfoIt->second == nullptr)
+                    continue;
+
+                auto* blockInfo = blockInfoIt->second;
                 GLint uniformOffset{-1};
                 glGetActiveUniformsiv(_program, 1, reinterpret_cast<const GLuint*>(&i), GL_UNIFORM_OFFSET,
                                       &uniformOffset);
                 auto elementSize = UtilsGL::getGLDataTypeSize(uniformType);
-                try
-                {
-                    const auto uniformId = makeUniformNameKey(uniformFullName);
-                    auto& uniformInfo    = getUniformInfo(uniformId);
 
-                    if (uniformInfo.cpuOffset != blockInfo->cpuOffset)
-                        uniformInfo.cpuOffset = blockInfo->cpuOffset;
+                const auto uniformId = makeUniformNameKey(uniformFullName);
+                const auto uniformIt = _activeUniformInfos.find(uniformId);
+                if (uniformIt == _activeUniformInfos.end())
+                    continue;
 
-                    if (uniformInfo.offset != uniformOffset)
-                        uniformInfo.offset = uniformOffset;
+                // A desktop GL driver may expose a linked UBO member with a
+                // name that is absent from the archive reflection. There is
+                // no CPU-side UniformInfo to adjust in that case.
+                auto& uniformInfo = uniformIt->second;
+                if (uniformInfo.cpuOffset != blockInfo->cpuOffset)
+                    uniformInfo.cpuOffset = blockInfo->cpuOffset;
 
-                    const auto sizeBytes = elementSize * uniformInfo.count;
-                    if (uniformInfo.sizeBytes != sizeBytes)
-                        uniformInfo.sizeBytes = sizeBytes;
-                }
-                catch (const std::exception& /*ex*/)
-                {
-                    AXLOGE("exception occurred when adjust uniform info");
-                }
+                if (uniformInfo.offset != uniformOffset)
+                    uniformInfo.offset = uniformOffset;
+
+                const auto sizeBytes = elementSize * uniformInfo.count;
+                if (uniformInfo.sizeBytes != sizeBytes)
+                    uniformInfo.sizeBytes = sizeBytes;
             }
         }
     }
