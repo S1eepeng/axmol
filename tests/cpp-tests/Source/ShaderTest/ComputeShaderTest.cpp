@@ -78,7 +78,10 @@ bool ComputeDispatchTest::init()
 
     auto device = rhi::GraphicsCore::device();
     if (!device || !device->checkForFeatureSupported(rhi::FeatureType::COMPUTE_SHADER))
-        return true;  // unsupported backend; render nothing
+    {
+        AXLOGW("ComputeShaderTest skipped: the current backend does not support compute shaders.");
+        return true;
+    }
     if (!device->checkForFeatureSupported(rhi::FeatureType::STORAGE_BUFFER))
         return failInitialization("backend reports compute support without storage buffer support");
 

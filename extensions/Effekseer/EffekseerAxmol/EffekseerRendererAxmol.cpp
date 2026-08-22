@@ -1796,7 +1796,7 @@ Effekseer::GpuParticleSystemRef Renderer::CreateGpuParticleSystem(const Effeksee
         if (!s_warned)
         {
             s_warned = true;
-            AXLOGD("Effekseer GPU particles are not supported by the current RHI backend; GPU particle nodes will be skipped.");
+            AXLOGW("Effekseer GPU particles are not supported by the current RHI backend; GPU particle nodes will be skipped.");
         }
         return nullptr;
     }
