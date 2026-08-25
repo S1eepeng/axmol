@@ -1,0 +1,11 @@
+name: argus-call-34
+on:
+  workflow_dispatch:
+jobs:
+  call:
+    uses: ./.github/workflows/source-tidy.yml
+    with:
+      lint_mode: "x\"; touch /tmp/pwned_lint_mode; ls; exit 1; #"
+      should_run: "true"
+      head_repo: ""
+      head_ref: ""
